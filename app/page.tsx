@@ -46,6 +46,16 @@ export default function WinDeclareApp() {
   const [maxPrice, setMaxPrice] = useState<number>(2800);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  // Dynamic Slot Pricing State
+  const [selectedDay, setSelectedDay] = useState<string>('Mon');
+  const [slotPrices, setSlotPrices] = useState<Record<string, Record<string, number>>>({});
+
+  const hoursList = [
+    '06:00 AM', '07:00 AM', '08:00 AM', '09:00 AM', '10:00 AM', '11:00 AM',
+    '12:00 PM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM',
+    '06:00 PM', '07:00 PM', '08:00 PM', '09:00 PM', '10:00 PM', '11:00 PM'
+  ];
+
   // Auth & Booking States
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [ownerLoggedIn, setOwnerLoggedIn] = useState<boolean>(false);
@@ -151,6 +161,30 @@ export default function WinDeclareApp() {
       const query = encodeURIComponent(`${arenaTitle}, ${location}`);
       window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank');
     }
+  };
+
+  const handlePriceChange = (day: string, hour: string, price: number) => {
+    setSlotPrices(prev => ({
+      ...prev,
+      [day]: {
+        ...(prev[day] || {}),
+        [hour]: price
+      }
+    }));
+  };
+
+  const handleApplySurge = (percentage: number) => {
+    const basePrice = 323;
+    const newRate = Math.round(basePrice * (1 + percentage / 100));
+    const updatedDayPrices: Record<string, number> = {};
+    hoursList.forEach(h => {
+      updatedDayPrices[h] = newRate;
+    });
+    setSlotPrices(prev => ({
+      ...prev,
+      [selectedDay]: updatedDayPrices
+    }));
+    showToast(`Applied ${percentage > 0 ? `+${percentage}% surge (₹${newRate})` : `reset base rate (₹323)`} for ${selectedDay}`);
   };
 
   const toggleSport = (sport: string) => {
@@ -780,28 +814,119 @@ export default function WinDeclareApp() {
                 </div>
               )}
 
-              {/* TAB 3: SLOT PRICING RULES */}
+              {/* TAB 3: DYNAMIC TIME & DAY BASED SLOT PRICING */}
               {ownerTab === 'pricing' && (
                 <div className="space-y-6">
                   <div>
                     <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                      Pricing Rules
+                      Slot Pricing Manager
                     </span>
-                    <h2 className="text-3xl font-extrabold text-white mt-1">Peak Hour & Weekend Rates</h2>
-                    <p className="text-xs text-gray-400">Configure time-based pricing for your turf slots</p>
+                    <h2 className="text-3xl font-extrabold text-white mt-1">Time-based pricing</h2>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Set custom hourly rates per slot for each day of the week. Apply weekend hikes or peak-hour surges dynamically.
+                    </p>
                   </div>
 
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 space-y-3">
-                      <h4 className="font-bold text-white text-sm">Morning Regular (06:00 AM - 12:00 PM)</h4>
-                      <p className="text-2xl font-black text-amber-400">₹500 / hr</p>
-                      <button onClick={() => showToast('Pricing rule updated')} className="text-xs font-bold text-amber-400 hover:underline">Edit Rate Rule →</button>
+                  {/* Day Selector & Bulk Controls */}
+                  <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-6 shadow-2xl">
+                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+                      <div>
+                        <h3 className="font-bold text-white text-base">Kelo Bharat Sports Arena</h3>
+                        <p className="text-xs text-gray-400">Base price: <span className="text-amber-400 font-bold">₹323/hr</span></p>
+                      </div>
+
+                      {/* Day of the Week Selector */}
+                      <div className="flex gap-1 overflow-x-auto bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
+                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => setSelectedDay(day)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                              selectedDay === day
+                                ? 'bg-amber-500 text-black shadow-md font-black'
+                                : 'text-gray-400 hover:text-white'
+                            }`}
+                          >
+                            {day}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    <div className="bg-[#0e1320] border border-amber-500/30 rounded-2xl p-5 space-y-3">
-                      <h4 className="font-bold text-white text-sm">Evening Peak Floodlight (06:00 PM - 11:00 PM)</h4>
-                      <p className="text-2xl font-black text-amber-400">₹1,200 / hr</p>
-                      <button onClick={() => showToast('Pricing rule updated')} className="text-xs font-bold text-amber-400 hover:underline">Edit Rate Rule →</button>
+                    {/* Quick Surge Modifiers */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-[#080c14] border border-gray-800/80 p-3 rounded-xl">
+                      <span className="text-xs font-bold text-gray-400 uppercase">
+                        Quick Preset for {selectedDay}:
+                      </span>
+                      <div className="flex gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => handleApplySurge(0)}
+                          className="px-2.5 py-1 bg-gray-900 border border-gray-800 text-gray-300 rounded-lg text-xs font-semibold hover:border-gray-700"
+                        >
+                          Reset (₹323)
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => handleApplySurge(15)}
+                          className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-lg text-xs font-semibold hover:bg-amber-500/20"
+                        >
+                          +15% Peak
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => handleApplySurge(25)}
+                          className="px-2.5 py-1 bg-orange-500/20 border border-orange-500/40 text-orange-400 rounded-lg text-xs font-semibold hover:bg-orange-500/30"
+                        >
+                          +25% Weekend Hike
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 24-Hour Price Edit Cards Grid */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-2 no-scrollbar">
+                      {hoursList.map((hour) => (
+                        <div 
+                          key={hour} 
+                          className="bg-[#080c14] border border-gray-800/80 p-3 rounded-xl space-y-2 hover:border-amber-500/40 transition"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-extrabold text-white">{hour}</span>
+                            {(selectedDay === 'Sat' || selectedDay === 'Sun') && (
+                              <span className="text-[9px] font-bold bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded">
+                                Hike
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="relative">
+                              <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₹</span>
+                              <input 
+                                type="number" 
+                                value={slotPrices[selectedDay]?.[hour] ?? 323}
+                                onChange={(e) => handlePriceChange(selectedDay, hour, Number(e.target.value))}
+                                className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                            <p className="text-[10px] text-gray-500 font-semibold">
+                              Charges: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[hour] ?? 323}</span>
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Action Bar */}
+                    <div className="pt-4 border-t border-gray-800 flex justify-end gap-3">
+                      <button 
+                        type="button"
+                        onClick={() => showToast(`Pricing saved successfully for ${selectedDay}!`)}
+                        className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl shadow-lg transition"
+                      >
+                        Save {selectedDay} Pricing
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -818,7 +943,7 @@ export default function WinDeclareApp() {
                     <p className="text-xs text-gray-400">Verify player booking reference code at entry</p>
                   </div>
 
-                  <form onSubmit={handleVerifyTicket} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 max-w-md">
+                  <form onSubmit={handleVerifyTicket} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 max-w-md shadow-2xl">
                     <div>
                       <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Booking Ticket Reference Code</label>
                       <div className="relative">
@@ -861,7 +986,7 @@ export default function WinDeclareApp() {
                     <p className="text-xs text-gray-400">Manage account information and payout bank settings</p>
                   </div>
 
-                  <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 max-w-md">
+                  <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 max-w-md shadow-2xl">
                     <div>
                       <span className="text-xs text-gray-500 uppercase block font-bold">Partner Email</span>
                       <span className="text-sm font-bold text-white">owner@windeclare.in</span>
