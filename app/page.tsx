@@ -5,8 +5,9 @@ import {
   Trophy, User, MapPin, Navigation, ArrowLeft,
   Calendar, CheckCircle2, Phone, ShieldCheck,
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
-  LogOut, Mail, Check, Star, Flame, Clock, Compass, Search, X,
-  Sparkles, SlidersHorizontal, AlertCircle, Ticket, QrCode
+  LogOut, Mail, Check, Star, Flame, Clock, Compass,
+  CreditCard, Smartphone, CheckCircle, X, Loader2, Search,
+  Sparkles, SlidersHorizontal, AlertCircle, Ticket, QrCode, Lock, Wallet
 } from 'lucide-react';
 
 interface Arena {
@@ -26,19 +27,10 @@ interface Arena {
 
 interface Booking {
   id: string;
-  arenaId: number;
   arenaTitle: string;
-  location: string;
-  locationUrl?: string;
   date: string;
-  timeSlot: string;
-  sport: string;
-  price: number;
-  totalPrice: number;
-  status: 'Confirmed' | 'Completed' | 'Cancelled';
-  paymentMethod: string;
-  playerPhone?: string;
-  createdAt: string;
+  slots: string;
+  amount: number;
 }
 
 export default function WinDeclareApp() {
@@ -50,20 +42,22 @@ export default function WinDeclareApp() {
 
   // Player's Live Geolocation Coordinates
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
 
-  // Selected Arena & Date State
+  // Selected Arena & Multi-Slot Booking States
   const [selectedArena, setSelectedArena] = useState<Arena | null>(null);
   const [selectedDateIndex, setSelectedDateIndex] = useState<number>(0);
-  
-  // Multi-Slot Selection State (Array of selected slot objects)
   const [selectedSlots, setSelectedSlots] = useState<{ time: string; price: number }[]>([]);
 
-  // Auth States
+  // Auth & Payment Modal States
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [otpSent, setOtpSent] = useState<boolean>(false);
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [otpCode, setOtpCode] = useState<string>('');
+
+  // Payment Gateway Modal
+  const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
+  const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
 
   // Owner Form State (Add New Turf Venue)
   const [showAddTurfForm, setShowAddTurfForm] = useState<boolean>(false);
@@ -90,6 +84,17 @@ export default function WinDeclareApp() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Confirmed User Bookings List
+  const [myBookings, setMyBookings] = useState<Booking[]>([
+    {
+      id: 'WD-09TKPU8',
+      arenaTitle: 'Akshay Box Turf',
+      date: 'SUN, Jul 2',
+      slots: '4:00 AM, 5:00 AM',
+      amount: 666
+    }
+  ]);
+
   // Request Player's Geolocation on Mount
   useEffect(() => {
     if (navigator.geolocation) {
@@ -100,20 +105,15 @@ export default function WinDeclareApp() {
             lng: position.coords.longitude,
           });
         },
-        (error) => {
-          console.error("Error getting location:", error);
-          setLocationError("Location access denied or unavailable");
-        },
+        (error) => console.error("Error getting location:", error),
         { enableHighAccuracy: true }
       );
-    } else {
-      setLocationError("Geolocation is not supported by your browser");
     }
   }, []);
 
-  // Haversine Formula: Calculates precise distance in kilometers between two GPS points
+  // Haversine Formula for distance calculation in kilometers
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371; // Earth's radius in kilometers
+    const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLon = ((lon2 - lon1) * Math.PI) / 180;
     const a =
@@ -123,11 +123,9 @@ export default function WinDeclareApp() {
         Math.sin(dLon / 2) *
         Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c;
-    return distance.toFixed(1); // Returns distance rounded to 1 decimal place (e.g. 5.1)
+    return (R * c).toFixed(1);
   };
 
-  // 7-Day Date Selector List
   const datesList = [
     { day: 'TUE', date: '28' },
     { day: 'WED', date: '29' },
@@ -138,7 +136,6 @@ export default function WinDeclareApp() {
     { day: 'MON', date: '3' }
   ];
 
-  // Full 24-Hour Slots with Prices
   const slotsData = [
     { time: '12:00 AM', price: 323 },
     { time: '1:00 AM', price: 323 },
@@ -166,7 +163,6 @@ export default function WinDeclareApp() {
     { time: '11:00 PM', price: 323 }
   ];
 
-  // Sample Arenas with real latitude and longitude
   const [arenas, setArenas] = useState<Arena[]>([
     {
       id: 1,
@@ -177,7 +173,7 @@ export default function WinDeclareApp() {
       price: 800,
       rating: 4.8,
       reviews: 22,
-      amenities: ['Floodlights', 'Parking'],
+      amenities: ['Floodlights', 'Parking', 'Water Dispenser'],
       sports: ['Football', 'Cricket'],
       image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
       locationUrl: 'https://maps.google.com/?q=Addagutta+Secunderabad+Box+Turf'
@@ -212,26 +208,6 @@ export default function WinDeclareApp() {
     }
   ]);
 
-  // Player Bookings Data
-  const [userBookings, setUserBookings] = useState<Booking[]>([
-    {
-      id: 'WD-43R5KMN70',
-      arenaId: 1,
-      arenaTitle: 'Akshay Box Turf',
-      location: 'Addagutta, Secunderabad',
-      locationUrl: 'https://maps.google.com/?q=Addagutta+Secunderabad+Box+Turf',
-      date: 'Tue, Jul 28',
-      timeSlot: '5:00 PM, 6:00 PM',
-      sport: 'Football',
-      price: 646,
-      totalPrice: 666,
-      status: 'Confirmed',
-      paymentMethod: 'UPI (GPay)',
-      playerPhone: '9876543210',
-      createdAt: '2026-07-27 12:30'
-    }
-  ]);
-
   const sportsList = ['Football', 'Cricket', 'Basketball', 'Tennis', 'Badminton', 'Volleyball', 'Pickleball'];
   const amenitiesList = ['Toilet', 'Parking', 'Drinking Water', 'Cafe', 'Floodlights', 'Changing Rooms'];
 
@@ -244,14 +220,12 @@ export default function WinDeclareApp() {
     }
   };
 
-  // Open Arena Details View
   const handleSelectArena = (arena: Arena) => {
     setSelectedArena(arena);
-    setSelectedSlots([]); // reset slots
+    setSelectedSlots([]);
     setView('arena-details');
   };
 
-  // Toggle Multiple Slots Selection
   const toggleSlotSelection = (slot: { time: string; price: number }) => {
     const exists = selectedSlots.some(s => s.time === slot.time);
     if (exists) {
@@ -261,7 +235,6 @@ export default function WinDeclareApp() {
     }
   };
 
-  // Calculate Total Price for Multiple Selected Hours
   const totalPrice = selectedSlots.reduce((acc, curr) => acc + curr.price, 0);
 
   const handleSendOtp = (e: React.FormEvent) => {
@@ -274,40 +247,40 @@ export default function WinDeclareApp() {
     }
   };
 
+  // STEP 1: Verify OTP and trigger Payment Gateway Modal
   const handleVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedArena || selectedSlots.length === 0) return;
-
     if (otpCode.length >= 4) {
       setIsAuthenticated(true);
-      const newBookingId = `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-
-      const newBooking: Booking = {
-        id: newBookingId,
-        arenaId: selectedArena.id,
-        arenaTitle: selectedArena.title,
-        location: selectedArena.location,
-        locationUrl: selectedArena.locationUrl,
-        date: `${datesList[selectedDateIndex]?.day}, Jul ${datesList[selectedDateIndex]?.date}`,
-        timeSlot: selectedSlots.map(s => s.time).join(', '),
-        sport: selectedArena.sports[0] || 'Football',
-        price: totalPrice,
-        totalPrice: totalPrice + 20,
-        status: 'Confirmed',
-        paymentMethod: 'UPI (GPay / PhonePe)',
-        playerPhone: phoneNumber,
-        createdAt: new Date().toISOString().replace('T', ' ').substring(0, 16)
-      };
-
-      setUserBookings([newBooking, ...userBookings]);
-      setSelectedSlots([]);
-      setOtpSent(false);
-      setOtpCode('');
-      showToast(`🎉 Booking Confirmed! Ticket ID: ${newBookingId}`);
-      setView('profile');
+      setShowPaymentModal(true); // Open Razorpay/UPI Payment Gateway Modal
     } else {
       alert('Please enter a valid 6-digit OTP code');
     }
+  };
+
+  // STEP 2: Process Gateway Payment & Confirm Booking
+  const handleProcessPayment = () => {
+    if (!selectedArena) return;
+    setIsProcessingPayment(true);
+
+    setTimeout(() => {
+      const newBooking: Booking = {
+        id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+        arenaTitle: selectedArena.title,
+        date: `${datesList[selectedDateIndex].day}, Jul ${datesList[selectedDateIndex].date}`,
+        slots: selectedSlots.map(s => s.time).join(', '),
+        amount: totalPrice
+      };
+
+      setMyBookings([newBooking, ...myBookings]);
+      setIsProcessingPayment(false);
+      setShowPaymentModal(false);
+      setSelectedSlots([]);
+      setOtpSent(false);
+      setOtpCode('');
+      showToast(`🎉 Payment Successful! Ticket ID: ${newBooking.id}`);
+      setView('profile'); // Send to active bookings page after successful payment
+    }, 2000);
   };
 
   const toggleSport = (sport: string) => {
@@ -445,7 +418,7 @@ export default function WinDeclareApp() {
 
               <button 
                 onClick={() => setView('profile')}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border transition ${
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border transition relative ${
                   view === 'profile'
                     ? 'bg-amber-500 text-black font-bold border-amber-400'
                     : 'text-gray-300 hover:text-white bg-gray-900 border-gray-800'
@@ -453,15 +426,17 @@ export default function WinDeclareApp() {
               >
                 <User className="w-4 h-4" />
                 <span>My Bookings</span>
-                <span className="bg-amber-400 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full ml-0.5">
-                  {userBookings.length}
-                </span>
+                {myBookings.length > 0 && (
+                  <span className="ml-1 bg-amber-400 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                    {myBookings.length}
+                  </span>
+                )}
               </button>
             </div>
           </div>
         </header>
 
-        {/* VIEW 1: LANDING PAGE WITH REAL-TIME DISTANCE */}
+        {/* VIEW 1: LANDING PAGE (WITH DISTANCE + NAVIGATE BUTTON) */}
         {view === 'browse' && (
           <main className="max-w-7xl mx-auto px-4 py-8">
             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -471,14 +446,9 @@ export default function WinDeclareApp() {
                     ⚡ Instant Confirmation
                   </span>
 
-                  {/* Geolocation Status Badge */}
-                  {userLocation ? (
+                  {userLocation && (
                     <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-md flex items-center gap-1">
                       <Compass className="w-3.5 h-3.5" /> GPS Active
-                    </span>
-                  ) : (
-                    <span className="text-xs font-bold text-gray-400 bg-gray-900 border border-gray-800 px-2.5 py-1 rounded-md">
-                      Detecting location...
                     </span>
                   )}
                 </div>
@@ -536,7 +506,6 @@ export default function WinDeclareApp() {
               {arenas
                 .filter(a => (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
                 .map((arena) => {
-                  // Real-Time Distance Calculation
                   const distance = userLocation 
                     ? calculateDistance(userLocation.lat, userLocation.lng, arena.lat, arena.lng)
                     : null;
@@ -547,7 +516,6 @@ export default function WinDeclareApp() {
                         <div className="relative h-48 bg-gray-950 overflow-hidden">
                           <img src={arena.image} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
                           
-                          {/* REAL-TIME DISTANCE BADGE */}
                           {distance && (
                             <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-amber-500/40 text-amber-400 text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
                               <Navigation className="w-3 h-3 fill-amber-400" /> {distance} km away
@@ -570,17 +538,27 @@ export default function WinDeclareApp() {
                       </div>
 
                       <div className="p-5 pt-0">
-                        <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
-                          <div>
-                            <span className="text-xl font-bold text-white">₹{arena.price}</span>
-                            <span className="text-xs text-gray-500">/hr</span>
+                        <div className="mt-4 pt-4 border-t border-gray-800 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="text-xl font-bold text-white">₹{arena.price}</span>
+                              <span className="text-xs text-gray-500">/hr</span>
+                            </div>
+
+                            <button 
+                              onClick={() => handleSelectArena(arena)}
+                              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/10"
+                            >
+                              Book Slot →
+                            </button>
                           </div>
 
+                          {/* RESTORED NAVIGATE BUTTON */}
                           <button 
-                            onClick={() => handleSelectArena(arena)}
-                            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/10"
+                            onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
+                            className="w-full py-2 bg-[#080c14] hover:bg-gray-900 border border-teal-500/30 text-teal-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
                           >
-                            Book Slot →
+                            <Navigation className="w-3.5 h-3.5" /> Navigate
                           </button>
                         </div>
                       </div>
@@ -611,50 +589,12 @@ export default function WinDeclareApp() {
 
             <div className="space-y-4">
               <h1 className="text-4xl font-black text-white tracking-tight">{selectedArena.title}</h1>
-              
-              <div className="flex items-center gap-4 text-xs flex-wrap">
-                <span className="text-gray-400 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-amber-500" /> {selectedArena.location}
-                </span>
-
-                {/* Show Distance in Arena Details as well */}
-                {userLocation && (
-                  <span className="text-amber-400 font-bold flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                    <Navigation className="w-3 h-3 fill-amber-400" /> {calculateDistance(userLocation.lat, userLocation.lng, selectedArena.lat, selectedArena.lng)} km away
-                  </span>
-                )}
-
-                <button 
-                  onClick={() => handleNavigate(selectedArena.title, selectedArena.location, selectedArena.locationUrl)}
-                  className="px-3 py-1 bg-[#0e1320] border border-teal-500/40 text-teal-400 font-bold rounded-lg flex items-center gap-1.5 hover:bg-gray-800 transition"
-                >
-                  <Navigation className="w-3.5 h-3.5" /> Navigate
-                </button>
-              </div>
-
-              {/* Amenities Tags */}
-              <div className="flex gap-2 pt-2 flex-wrap">
-                {selectedArena.amenities.map((a: string) => (
-                  <span key={a} className="px-4 py-2 bg-[#0e1320] border border-gray-800 rounded-xl text-xs font-semibold text-gray-300">
-                    ✓ {a}
-                  </span>
-                ))}
-              </div>
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-amber-500" /> {selectedArena.location}
+              </p>
             </div>
 
-            {/* Booking Card */}
             <div className="bg-[#0b101d] border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">STARTING FROM</span>
-                  <span className="text-3xl font-black text-white">₹{selectedArena.price}<span className="text-sm font-normal text-gray-400">/hr</span></span>
-                </div>
-
-                <div className="flex items-center gap-1 bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs font-bold px-2.5 py-1 rounded-lg">
-                  <Flame className="w-3.5 h-3.5 fill-orange-400" /> Peak +25%
-                </div>
-              </div>
-
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-amber-500" /> SELECT DATE
@@ -666,8 +606,8 @@ export default function WinDeclareApp() {
                       onClick={() => setSelectedDateIndex(index)}
                       className={`flex-1 min-w-[60px] py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
                         selectedDateIndex === index
-                          ? 'bg-gradient-to-b from-amber-500 to-orange-500 text-black border-amber-500 font-bold shadow-lg'
-                          : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                          ? 'bg-gradient-to-b from-amber-500 to-orange-500 text-black border-amber-500 font-bold'
+                          : 'bg-[#080c14] border-gray-800 text-gray-400'
                       }`}
                     >
                       <span className="text-[10px] uppercase font-semibold">{d.day}</span>
@@ -691,7 +631,7 @@ export default function WinDeclareApp() {
                         className={`p-3 rounded-2xl border transition text-center space-y-1 ${
                           isSelected 
                             ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold' 
-                            : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
+                            : 'bg-[#080c14] border-gray-800 text-gray-200'
                         }`}
                       >
                         <p className="text-xs font-extrabold">{slot.time}</p>
@@ -708,20 +648,14 @@ export default function WinDeclareApp() {
                 <div className="pt-4 border-t border-gray-800 space-y-4">
                   <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-amber-400 uppercase block font-mono">
-                        {selectedSlots.length} Hour{selectedSlots.length > 1 ? 's' : ''} Selected
-                      </span>
-                      <p className="text-[11px] text-gray-400 truncate max-w-[200px]">
-                        {selectedSlots.map(s => s.time).join(', ')}
-                      </p>
+                      <span className="text-xs font-bold text-amber-400 uppercase block font-mono">{selectedSlots.length} Hour(s) Selected</span>
+                      <p className="text-[11px] text-gray-400 truncate max-w-[200px]">{selectedSlots.map(s => s.time).join(', ')}</p>
                     </div>
                     <div className="text-right">
                       <span className="text-2xl font-black text-white font-mono">₹{totalPrice}</span>
-                      <span className="text-[10px] text-gray-500 block">Total Price</span>
                     </div>
                   </div>
 
-                  {/* OTP Verification Form before Checkout */}
                   {!otpSent ? (
                     <form onSubmit={handleSendOtp} className="space-y-3">
                       <div className="relative">
@@ -739,7 +673,7 @@ export default function WinDeclareApp() {
                         type="submit"
                         className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg"
                       >
-                        Send OTP & Continue to Pay ₹{totalPrice}
+                        Send OTP & Continue
                       </button>
                     </form>
                   ) : (
@@ -757,7 +691,7 @@ export default function WinDeclareApp() {
                         type="submit"
                         className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg flex items-center justify-center gap-2"
                       >
-                        <ShieldCheck className="w-4 h-4" /> Verify OTP & Confirm Booking (₹{totalPrice})
+                        <ShieldCheck className="w-4 h-4" /> Verify OTP & Proceed to Payment
                       </button>
                     </form>
                   )}
@@ -1061,19 +995,19 @@ export default function WinDeclareApp() {
                   </div>
 
                   <div className="space-y-4">
-                    {userBookings.map((b) => (
+                    {myBookings.map((b) => (
                       <div key={b.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="space-y-1">
                           <span className="text-xs font-black text-amber-500">{b.id}</span>
                           <h4 className="font-bold text-white text-base">{b.arenaTitle}</h4>
                           <p className="text-xs text-gray-400 flex items-center gap-2">
-                            <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.timeSlot} ({b.sport})
+                            <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
                           </p>
-                          <p className="text-[11px] text-gray-500">Player Contact: +91 {b.playerPhone || '9876543210'}</p>
+                          <p className="text-[11px] text-gray-500">Player Contact: +91 {phoneNumber || '9876543210'}</p>
                         </div>
 
                         <div className="sm:text-right space-y-1">
-                          <span className="text-xl font-black text-amber-400 block">₹{b.price}</span>
+                          <span className="text-xl font-black text-amber-400 block font-mono">₹{b.amount}</span>
                           <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
                             ✓ Payment Collected
                           </span>
@@ -1280,7 +1214,7 @@ export default function WinDeclareApp() {
           </div>
         )}
 
-        {/* VIEW 4: PROFILE & USER BOOKINGS */}
+        {/* VIEW 4: MY BOOKINGS (ACTIVE BOOKINGS) */}
         {view === 'profile' && (
           <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
             <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 flex items-center justify-between shadow-xl">
@@ -1296,13 +1230,11 @@ export default function WinDeclareApp() {
 
               <div className="flex gap-6 text-center">
                 <div>
-                  <p className="text-xl font-bold text-white">{userBookings.length}</p>
+                  <p className="text-xl font-bold text-white">{myBookings.length}</p>
                   <p className="text-xs text-gray-500 uppercase font-bold">Total</p>
                 </div>
                 <div>
-                  <p className="text-xl font-bold text-emerald-400">
-                    {userBookings.filter(b => b.status === 'Confirmed').length}
-                  </p>
+                  <p className="text-xl font-bold text-emerald-400">{myBookings.length}</p>
                   <p className="text-xs text-gray-500 uppercase font-bold">Confirmed</p>
                 </div>
               </div>
@@ -1310,18 +1242,20 @@ export default function WinDeclareApp() {
 
             <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
               <h3 className="text-base font-bold text-white">Active Bookings</h3>
+
               <div className="space-y-3">
-                {userBookings.map((b) => (
+                {myBookings.map((b) => (
                   <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
                     <div className="space-y-1">
                       <span className="text-[10px] font-bold text-amber-500 uppercase">{b.id}</span>
                       <h4 className="font-bold text-white text-sm">{b.arenaTitle}</h4>
                       <p className="text-xs text-gray-400 flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.timeSlot}
+                        <Calendar className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
                       </p>
                     </div>
+
                     <div className="text-right">
-                      <span className="text-sm font-black text-emerald-400 block font-mono">₹{b.totalPrice}</span>
+                      <span className="text-sm font-black text-amber-400 block font-mono">₹{b.amount}</span>
                       <span className="text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded font-bold inline-block mt-1">
                         ✓ Confirmed
                       </span>
@@ -1333,6 +1267,122 @@ export default function WinDeclareApp() {
           </main>
         )}
       </div>
+
+      {/* POPUP MODAL: PAYMENT GATEWAY (UPI / CARD / NETBANKING) */}
+      {showPaymentModal && selectedArena && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0e1320] border border-gray-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative space-y-6">
+            <button 
+              onClick={() => setShowPaymentModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-white p-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-500 uppercase tracking-wider">
+                <Lock className="w-3.5 h-3.5" /> Secure Checkout
+              </div>
+              <h3 className="text-xl font-extrabold text-white mt-1">Select Payment Method</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Amount to pay: <span className="text-amber-400 font-bold font-mono">₹{totalPrice}</span></p>
+            </div>
+
+            {/* Payment Method Selector */}
+            <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentMethod('upi')}
+                className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition ${
+                  selectedPaymentMethod === 'upi'
+                    ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
+                    : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Smartphone className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <p className="text-xs font-bold">UPI (GPay / PhonePe / Paytm)</p>
+                    <p className="text-[10px] text-gray-500 font-normal">Instant 1-tap checkout</p>
+                  </div>
+                </div>
+                {selectedPaymentMethod === 'upi' && <CheckCircle className="w-4 h-4 text-amber-500" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentMethod('card')}
+                className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition ${
+                  selectedPaymentMethod === 'card'
+                    ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
+                    : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <CreditCard className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <p className="text-xs font-bold">Credit / Debit Card</p>
+                    <p className="text-[10px] text-gray-500 font-normal">Visa, Mastercard, RuPay</p>
+                  </div>
+                </div>
+                {selectedPaymentMethod === 'card' && <CheckCircle className="w-4 h-4 text-amber-500" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentMethod('netbanking')}
+                className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition ${
+                  selectedPaymentMethod === 'netbanking'
+                    ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
+                    : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Wallet className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <p className="text-xs font-bold">Net Banking</p>
+                    <p className="text-[10px] text-gray-500 font-normal">All major Indian banks</p>
+                  </div>
+                </div>
+                {selectedPaymentMethod === 'netbanking' && <CheckCircle className="w-4 h-4 text-amber-500" />}
+              </button>
+            </div>
+
+            {/* Payment Summary */}
+            <div className="bg-[#080c14] border border-gray-800 p-3 rounded-xl space-y-1 text-xs">
+              <div className="flex justify-between text-gray-400">
+                <span>Slot Amount:</span>
+                <span>₹{totalPrice}</span>
+              </div>
+              <div className="flex justify-between text-gray-400">
+                <span>Convenience Fee:</span>
+                <span className="text-emerald-400 font-bold">FREE</span>
+              </div>
+              <div className="flex justify-between font-bold text-white pt-2 border-t border-gray-800">
+                <span>Total Payable:</span>
+                <span className="text-amber-400 font-mono text-base">₹{totalPrice}</span>
+              </div>
+            </div>
+
+            {/* Submit Payment Button */}
+            <button
+              type="button"
+              disabled={isProcessingPayment}
+              onClick={handleProcessPayment}
+              className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold py-3.5 rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+            >
+              {isProcessingPayment ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Processing Payment...
+                </>
+              ) : (
+                <>
+                  <Lock className="w-4 h-4 stroke-[3]" /> Pay ₹{totalPrice} & Confirm Slot
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-gray-800 bg-[#0a0e17] py-8 text-xs text-gray-500">
