@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Trophy, User, MapPin, Navigation, ArrowLeft,
   Calendar, CheckCircle2, Phone, ShieldCheck,
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
-  LogOut, Mail, Check, Star, Flame, Clock, Search, X,
+  LogOut, Mail, Check, Star, Flame, Clock, Compass, Search, X,
   Sparkles, SlidersHorizontal, AlertCircle, Ticket, QrCode
 } from 'lucide-react';
 
@@ -13,6 +13,8 @@ interface Arena {
   id: number;
   title: string;
   location: string;
+  lat: number;
+  lng: number;
   price: number;
   rating: number;
   reviews: number;
@@ -45,6 +47,10 @@ export default function WinDeclareApp() {
   const [selectedSport, setSelectedSport] = useState<string>('All');
   const [maxPrice, setMaxPrice] = useState<number>(2800);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Player's Live Geolocation Coordinates
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // Selected Arena & Date State
   const [selectedArena, setSelectedArena] = useState<Arena | null>(null);
@@ -82,6 +88,43 @@ export default function WinDeclareApp() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Request Player's Geolocation on Mount
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        (error) => {
+          console.error("Error getting location:", error);
+          setLocationError("Location access denied or unavailable");
+        },
+        { enableHighAccuracy: true }
+      );
+    } else {
+      setLocationError("Geolocation is not supported by your browser");
+    }
+  }, []);
+
+  // Haversine Formula: Calculates precise distance in kilometers between two GPS points
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+    return distance.toFixed(1); // Returns distance rounded to 1 decimal place (e.g. 5.1)
   };
 
   // 7-Day Date Selector List
@@ -123,31 +166,49 @@ export default function WinDeclareApp() {
     { time: '11:00 PM', price: 323 }
   ];
 
-  // Arenas Data
+  // Sample Arenas with real latitude and longitude
   const [arenas, setArenas] = useState<Arena[]>([
     {
       id: 1,
-      title: 'Jenen Sports Arena',
-      location: 'Nenenrb, Hyderabad',
-      price: 323,
-      rating: 4.9,
-      reviews: 54,
-      amenities: ['Floodlights', 'Parking', 'Cafeteria'],
-      sports: ['Cricket', 'Football'],
-      image: 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?w=800&auto=format&fit=crop',
-      locationUrl: 'https://maps.google.com/?q=Jenen+Sports+Arena+Hyderabad'
+      title: 'Akshay Box Turf',
+      location: 'Addagutta, Secunderabad',
+      lat: 17.4399,
+      lng: 78.5082,
+      price: 800,
+      rating: 4.8,
+      reviews: 22,
+      amenities: ['Floodlights', 'Parking'],
+      sports: ['Football', 'Cricket'],
+      image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
+      locationUrl: 'https://maps.google.com/?q=Addagutta+Secunderabad+Box+Turf'
     },
     {
       id: 2,
       title: 'Kelo Bharat Sports Arena',
       location: 'Gachibowli, Hyderabad',
+      lat: 17.4401,
+      lng: 78.3489,
       price: 500,
-      rating: 4.8,
+      rating: 4.9,
       reviews: 39,
       amenities: ['AC Courts', 'Shower Rooms'],
       sports: ['Badminton', 'Tennis'],
-      image: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&auto=format&fit=crop',
+      image: 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?w=800&auto=format&fit=crop',
       locationUrl: 'https://maps.google.com/?q=Gachibowli+Hyderabad+Sports+Arena'
+    },
+    {
+      id: 3,
+      title: 'Smash & Serve Tennis Hub',
+      location: 'Jubilee Hills, Hyderabad',
+      lat: 17.4319,
+      lng: 78.4071,
+      price: 1200,
+      rating: 4.9,
+      reviews: 31,
+      amenities: ['Cafeteria', 'Floodlights'],
+      sports: ['Tennis', 'Pickleball'],
+      image: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&auto=format&fit=crop',
+      locationUrl: 'https://maps.google.com/?q=Jubilee+Hills+Tennis+Hub'
     }
   ]);
 
@@ -156,9 +217,9 @@ export default function WinDeclareApp() {
     {
       id: 'WD-43R5KMN70',
       arenaId: 1,
-      arenaTitle: 'Jenen Sports Arena',
-      location: 'Nenenrb, Hyderabad',
-      locationUrl: 'https://maps.google.com/?q=Jenen+Sports+Arena+Hyderabad',
+      arenaTitle: 'Akshay Box Turf',
+      location: 'Addagutta, Secunderabad',
+      locationUrl: 'https://maps.google.com/?q=Addagutta+Secunderabad+Box+Turf',
       date: 'Tue, Jul 28',
       timeSlot: '5:00 PM, 6:00 PM',
       sport: 'Football',
@@ -276,6 +337,8 @@ export default function WinDeclareApp() {
       id: Date.now(),
       title: newArenaName,
       location: newArenaLocation,
+      lat: 17.4399,
+      lng: 78.5082,
       price: Number(newArenaPrice),
       rating: 5.0,
       reviews: 1,
@@ -398,15 +461,29 @@ export default function WinDeclareApp() {
           </div>
         </header>
 
-        {/* VIEW 1: BROWSE ARENAS */}
+        {/* VIEW 1: LANDING PAGE WITH REAL-TIME DISTANCE */}
         {view === 'browse' && (
           <main className="max-w-7xl mx-auto px-4 py-8">
             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
               <div>
-                <span className="text-xs font-bold text-amber-500 tracking-widest uppercase bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-md">
-                  ⚡ Instant Confirmation
-                </span>
-                <h1 className="text-3xl sm:text-4xl font-extrabold mt-3 text-white">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold text-amber-500 tracking-widest uppercase bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-md">
+                    ⚡ Instant Confirmation
+                  </span>
+
+                  {/* Geolocation Status Badge */}
+                  {userLocation ? (
+                    <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-md flex items-center gap-1">
+                      <Compass className="w-3.5 h-3.5" /> GPS Active
+                    </span>
+                  ) : (
+                    <span className="text-xs font-bold text-gray-400 bg-gray-900 border border-gray-800 px-2.5 py-1 rounded-md">
+                      Detecting location...
+                    </span>
+                  )}
+                </div>
+
+                <h1 className="text-3xl sm:text-4xl font-extrabold text-white">
                   Find the perfect <span className="text-amber-400">turf</span> near you.
                 </h1>
                 <p className="text-gray-400 text-xs sm:text-sm mt-1">
@@ -434,7 +511,7 @@ export default function WinDeclareApp() {
                   type="text" 
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by arena name, location (e.g. Nenenrb, Gachibowli)..." 
+                  placeholder="Search by arena name, location (e.g. Addagutta, Gachibowli)..." 
                   className="w-full bg-[#070b12] border border-gray-800 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:border-amber-500 text-white"
                 />
               </div>
@@ -458,43 +535,58 @@ export default function WinDeclareApp() {
             <div className="grid md:grid-cols-3 gap-6">
               {arenas
                 .filter(a => (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
-                .map((arena) => (
-                  <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-amber-500/40 transition flex flex-col justify-between shadow-xl group">
-                    <div>
-                      <div className="relative h-48 bg-gray-950 overflow-hidden">
-                        <img src={arena.image} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
-                        <div className="absolute top-3 right-3 bg-black/80 backdrop-blur text-xs font-bold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1">
-                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> {arena.rating} ({arena.reviews})
+                .map((arena) => {
+                  // Real-Time Distance Calculation
+                  const distance = userLocation 
+                    ? calculateDistance(userLocation.lat, userLocation.lng, arena.lat, arena.lng)
+                    : null;
+
+                  return (
+                    <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-amber-500/40 transition flex flex-col justify-between shadow-xl group">
+                      <div>
+                        <div className="relative h-48 bg-gray-950 overflow-hidden">
+                          <img src={arena.image} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                          
+                          {/* REAL-TIME DISTANCE BADGE */}
+                          {distance && (
+                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-amber-500/40 text-amber-400 text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                              <Navigation className="w-3 h-3 fill-amber-400" /> {distance} km away
+                            </div>
+                          )}
+
+                          <div className="absolute top-3 right-3 bg-black/80 backdrop-blur text-xs font-bold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1">
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> {arena.rating} ({arena.reviews})
+                          </div>
+                        </div>
+
+                        <div className="p-5 flex-1 flex flex-col justify-between space-y-2">
+                          <div>
+                            <h3 className="font-bold text-lg text-white group-hover:text-amber-400 transition">{arena.title}</h3>
+                            <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
+                              <MapPin className="w-3.5 h-3.5 text-amber-500" /> {arena.location}
+                            </p>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="p-5 flex-1 flex flex-col justify-between">
-                        <div>
-                          <h3 className="font-bold text-lg text-white group-hover:text-amber-400 transition">{arena.title}</h3>
-                          <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
-                            <MapPin className="w-3.5 h-3.5 text-amber-500" /> {arena.location}
-                          </p>
+                      <div className="p-5 pt-0">
+                        <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
+                          <div>
+                            <span className="text-xl font-bold text-white">₹{arena.price}</span>
+                            <span className="text-xs text-gray-500">/hr</span>
+                          </div>
+
+                          <button 
+                            onClick={() => handleSelectArena(arena)}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/10"
+                          >
+                            Book Slot →
+                          </button>
                         </div>
                       </div>
                     </div>
-
-                    <div className="p-5 pt-0">
-                      <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
-                        <div>
-                          <span className="text-xl font-bold text-white">₹{arena.price}</span>
-                          <span className="text-xs text-gray-500">/hr</span>
-                        </div>
-
-                        <button 
-                          onClick={() => handleSelectArena(arena)}
-                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/10"
-                        >
-                          Book Slot →
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
           </main>
         )}
@@ -502,7 +594,6 @@ export default function WinDeclareApp() {
         {/* VIEW 2: ARENA DETAILS & MULTI-SLOT BOOKING */}
         {view === 'arena-details' && selectedArena && (
           <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-            {/* Header Bar */}
             <div className="flex items-center justify-between">
               <button 
                 onClick={() => setView('browse')}
@@ -518,14 +609,20 @@ export default function WinDeclareApp() {
               </div>
             </div>
 
-            {/* Arena Info Card */}
             <div className="space-y-4">
               <h1 className="text-4xl font-black text-white tracking-tight">{selectedArena.title}</h1>
               
-              <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-4 text-xs flex-wrap">
                 <span className="text-gray-400 flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5 text-amber-500" /> {selectedArena.location}
                 </span>
+
+                {/* Show Distance in Arena Details as well */}
+                {userLocation && (
+                  <span className="text-amber-400 font-bold flex items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                    <Navigation className="w-3 h-3 fill-amber-400" /> {calculateDistance(userLocation.lat, userLocation.lng, selectedArena.lat, selectedArena.lng)} km away
+                  </span>
+                )}
 
                 <button 
                   onClick={() => handleNavigate(selectedArena.title, selectedArena.location, selectedArena.locationUrl)}
@@ -533,10 +630,6 @@ export default function WinDeclareApp() {
                 >
                   <Navigation className="w-3.5 h-3.5" /> Navigate
                 </button>
-
-                <span className="text-amber-400 font-bold flex items-center gap-1">
-                  <Star className="w-3.5 h-3.5 fill-amber-400" /> {selectedArena.rating} ({selectedArena.reviews} reviews)
-                </span>
               </div>
 
               {/* Amenities Tags */}
@@ -549,8 +642,8 @@ export default function WinDeclareApp() {
               </div>
             </div>
 
-            {/* BOOKING CARD */}
-            <div className="bg-[#0b101d] border border-gray-800/90 rounded-3xl p-6 shadow-2xl space-y-6">
+            {/* Booking Card */}
+            <div className="bg-[#0b101d] border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block">STARTING FROM</span>
@@ -562,12 +655,10 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
-              {/* 1. Select Date Carousel */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-amber-500" /> SELECT DATE
                 </span>
-
                 <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
                   {datesList.map((d, index) => (
                     <button
@@ -586,19 +677,13 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
-              {/* 2. Available Slots Grid (Multi-Select Enabled) */}
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-amber-500" /> AVAILABLE SLOTS
-                  </span>
-                  <span className="text-[11px] text-gray-500 font-medium">Tap multiple to book consecutive hours</span>
-                </div>
-
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-amber-500" /> AVAILABLE SLOTS
+                </span>
                 <div className="grid grid-cols-3 gap-3">
                   {slotsData.map((slot) => {
                     const isSelected = selectedSlots.some(s => s.time === slot.time);
-
                     return (
                       <button
                         key={slot.time}
@@ -606,7 +691,7 @@ export default function WinDeclareApp() {
                         className={`p-3 rounded-2xl border transition text-center space-y-1 ${
                           isSelected 
                             ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold' 
-                            : 'bg-[#080c14] border-gray-800/80 text-gray-200 hover:border-gray-700'
+                            : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
                         }`}
                       >
                         <p className="text-xs font-extrabold">{slot.time}</p>
@@ -619,12 +704,11 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
-              {/* Checkout Action Summary */}
               {selectedSlots.length > 0 && (
                 <div className="pt-4 border-t border-gray-800 space-y-4">
                   <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-amber-400 uppercase block">
+                      <span className="text-xs font-bold text-amber-400 uppercase block font-mono">
                         {selectedSlots.length} Hour{selectedSlots.length > 1 ? 's' : ''} Selected
                       </span>
                       <p className="text-[11px] text-gray-400 truncate max-w-[200px]">
@@ -632,7 +716,7 @@ export default function WinDeclareApp() {
                       </p>
                     </div>
                     <div className="text-right">
-                      <span className="text-2xl font-black text-white">₹{totalPrice}</span>
+                      <span className="text-2xl font-black text-white font-mono">₹{totalPrice}</span>
                       <span className="text-[10px] text-gray-500 block">Total Price</span>
                     </div>
                   </div>
@@ -1017,7 +1101,7 @@ export default function WinDeclareApp() {
                   <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-6 shadow-2xl">
                     <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
                       <div>
-                        <h3 className="font-bold text-white text-base">Kelo Bharat Sports Arena</h3>
+                        <h3 className="font-bold text-white text-base">Akshay Box Turf</h3>
                         <p className="text-xs text-gray-400">Base price: <span className="text-amber-400 font-bold">₹323/hr</span></p>
                       </div>
 
