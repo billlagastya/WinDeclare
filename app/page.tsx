@@ -5,9 +5,9 @@ import {
   Trophy, User, MapPin, Navigation, ArrowLeft,
   Calendar, CheckCircle2, Phone, ShieldCheck,
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
-  LogOut, Mail, Check, Star, Flame, Clock, Compass,
+  LogOut, Mail, Check, Star, Clock, Compass,
   CreditCard, Smartphone, CheckCircle, X, Loader2, Search,
-  Sparkles, SlidersHorizontal, AlertCircle, Ticket, QrCode, Lock, Wallet
+  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet
 } from 'lucide-react';
 
 interface Arena {
@@ -34,8 +34,14 @@ interface Booking {
 }
 
 export default function WinDeclareApp() {
-  const [view, setView] = useState<'browse' | 'arena-details' | 'profile' | 'owner-portal'>('browse');
+  const [view, setView] = useState<'browse' | 'arena-details' | 'profile' | 'owner-portal' | 'admin-dashboard'>('browse');
   const [ownerTab, setOwnerTab] = useState<'listings' | 'bookings' | 'pricing' | 'checkin' | 'account'>('listings');
+  const [profileTab, setProfileTab] = useState<'bookings' | 'favorites' | 'account'>('bookings');
+  
+  // Profile Menu Dropdown State
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState<boolean>(false);
+
+  // Search & Filters
   const [selectedSport, setSelectedSport] = useState<string>('All');
   const [maxPrice, setMaxPrice] = useState<number>(2800);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -48,11 +54,27 @@ export default function WinDeclareApp() {
   const [selectedDateIndex, setSelectedDateIndex] = useState<number>(0);
   const [selectedSlots, setSelectedSlots] = useState<{ time: string; price: number }[]>([]);
 
-  // Auth & Payment Modal States
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  // User Favorites State
+  const [favoriteArenaIds, setFavoriteArenaIds] = useState<number[]>([1]);
+
+  // Auth States
+  const [currentUser, setCurrentUser] = useState<{ name: string; phone?: string; email?: string; provider: 'phone' | 'google' } | null>({
+    name: 'Shravan Kumar',
+    phone: '+91 9505737751',
+    provider: 'phone'
+  });
+  
+  const [authMode, setAuthMode] = useState<'phone' | 'google'>('phone');
   const [otpSent, setOtpSent] = useState<boolean>(false);
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [otpCode, setOtpCode] = useState<string>('');
+
+  // Admin Dashboard State (Stores Verified Users & Database Records)
+  const [registeredUsers, setRegisteredUsers] = useState([
+    { id: 'USR-101', name: 'Shravan Kumar', contact: '+91 9505737751', provider: 'Phone OTP', joined: 'Jul 28, 2026', totalBookings: 2, status: 'Verified' },
+    { id: 'USR-102', name: 'Rahul Verma', contact: 'rahul.v@gmail.com', provider: 'Google Auth', joined: 'Jul 27, 2026', totalBookings: 1, status: 'Verified' },
+    { id: 'USR-103', name: 'Ananya Sharma', contact: '+91 9876543210', provider: 'Phone OTP', joined: 'Jul 25, 2026', totalBookings: 4, status: 'Verified' }
+  ]);
 
   // Payment Gateway Modal
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
@@ -95,7 +117,7 @@ export default function WinDeclareApp() {
     }
   ]);
 
-  // Request Player's Geolocation on Mount
+  // Geolocation Request on Mount
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -111,7 +133,7 @@ export default function WinDeclareApp() {
     }
   }, []);
 
-  // Haversine Formula for distance calculation in kilometers
+  // Haversine Distance Calculation
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -125,43 +147,6 @@ export default function WinDeclareApp() {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return (R * c).toFixed(1);
   };
-
-  const datesList = [
-    { day: 'TUE', date: '28' },
-    { day: 'WED', date: '29' },
-    { day: 'THU', date: '30' },
-    { day: 'FRI', date: '31' },
-    { day: 'SAT', date: '1' },
-    { day: 'SUN', date: '2' },
-    { day: 'MON', date: '3' }
-  ];
-
-  const slotsData = [
-    { time: '12:00 AM', price: 323 },
-    { time: '1:00 AM', price: 323 },
-    { time: '2:00 AM', price: 323 },
-    { time: '3:00 AM', price: 323 },
-    { time: '4:00 AM', price: 323 },
-    { time: '5:00 AM', price: 323 },
-    { time: '6:00 AM', price: 323 },
-    { time: '7:00 AM', price: 323 },
-    { time: '8:00 AM', price: 323 },
-    { time: '9:00 AM', price: 323 },
-    { time: '10:00 AM', price: 323 },
-    { time: '11:00 AM', price: 323 },
-    { time: '12:00 PM', price: 323 },
-    { time: '1:00 PM', price: 323 },
-    { time: '2:00 PM', price: 323 },
-    { time: '3:00 PM', price: 323 },
-    { time: '4:00 PM', price: 323 },
-    { time: '5:00 PM', price: 404, isPeak: true },
-    { time: '6:00 PM', price: 404, isPeak: true },
-    { time: '7:00 PM', price: 404, isPeak: true },
-    { time: '8:00 PM', price: 404, isPeak: true },
-    { time: '9:00 PM', price: 404, isPeak: true },
-    { time: '10:00 PM', price: 323 },
-    { time: '11:00 PM', price: 323 }
-  ];
 
   const [arenas, setArenas] = useState<Arena[]>([
     {
@@ -211,6 +196,54 @@ export default function WinDeclareApp() {
   const sportsList = ['Football', 'Cricket', 'Basketball', 'Tennis', 'Badminton', 'Volleyball', 'Pickleball'];
   const amenitiesList = ['Toilet', 'Parking', 'Drinking Water', 'Cafe', 'Floodlights', 'Changing Rooms'];
 
+  const datesList = [
+    { day: 'TUE', date: '28' },
+    { day: 'WED', date: '29' },
+    { day: 'THU', date: '30' },
+    { day: 'FRI', date: '31' },
+    { day: 'SAT', date: '1' },
+    { day: 'SUN', date: '2' },
+    { day: 'MON', date: '3' }
+  ];
+
+  const slotsData = [
+    { time: '12:00 AM', price: 323 },
+    { time: '1:00 AM', price: 323 },
+    { time: '2:00 AM', price: 323 },
+    { time: '3:00 AM', price: 323 },
+    { time: '4:00 AM', price: 323 },
+    { time: '5:00 AM', price: 323 },
+    { time: '6:00 AM', price: 323 },
+    { time: '7:00 AM', price: 323 },
+    { time: '8:00 AM', price: 323 },
+    { time: '9:00 AM', price: 323 },
+    { time: '10:00 AM', price: 323 },
+    { time: '11:00 AM', price: 323 },
+    { time: '12:00 PM', price: 323 },
+    { time: '1:00 PM', price: 323 },
+    { time: '2:00 PM', price: 323 },
+    { time: '3:00 PM', price: 323 },
+    { time: '4:00 PM', price: 323 },
+    { time: '5:00 PM', price: 404 },
+    { time: '6:00 PM', price: 404 },
+    { time: '7:00 PM', price: 404 },
+    { time: '8:00 PM', price: 404 },
+    { time: '9:00 PM', price: 404 },
+    { time: '10:00 PM', price: 323 },
+    { time: '11:00 PM', price: 323 }
+  ];
+
+  const toggleFavorite = (arenaId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (favoriteArenaIds.includes(arenaId)) {
+      setFavoriteArenaIds(favoriteArenaIds.filter(id => id !== arenaId));
+      showToast('Removed from favorites');
+    } else {
+      setFavoriteArenaIds([...favoriteArenaIds, arenaId]);
+      showToast('Added to favorites ❤️');
+    }
+  };
+
   const handleNavigate = (title: string, location: string, locationUrl?: string) => {
     if (locationUrl && locationUrl.trim() !== '') {
       window.open(locationUrl, '_blank');
@@ -237,6 +270,24 @@ export default function WinDeclareApp() {
 
   const totalPrice = selectedSlots.reduce((acc, curr) => acc + curr.price, 0);
 
+  // Authentication Handlers
+  const handleGoogleSignIn = () => {
+    const newUser = {
+      name: 'Google Player',
+      email: 'player.google@gmail.com',
+      provider: 'google' as const
+    };
+    setCurrentUser(newUser);
+    setShowPaymentModal(true);
+    showToast('Signed in via Google');
+    
+    // Add user to admin database
+    setRegisteredUsers([
+      { id: `USR-${Math.floor(100 + Math.random() * 900)}`, name: newUser.name, contact: newUser.email, provider: 'Google Auth', joined: 'Just Now', totalBookings: 1, status: 'Verified' },
+      ...registeredUsers
+    ]);
+  };
+
   const handleSendOtp = (e: React.FormEvent) => {
     e.preventDefault();
     if (phoneNumber.length >= 10) {
@@ -247,18 +298,27 @@ export default function WinDeclareApp() {
     }
   };
 
-  // STEP 1: Verify OTP and trigger Payment Gateway Modal
   const handleVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
     if (otpCode.length >= 4) {
-      setIsAuthenticated(true);
-      setShowPaymentModal(true); // Open Razorpay/UPI Payment Gateway Modal
+      const newUser = {
+        name: 'Verified Player',
+        phone: `+91 ${phoneNumber}`,
+        provider: 'phone' as const
+      };
+      setCurrentUser(newUser);
+      setShowPaymentModal(true);
+      showToast('Mobile number verified successfully!');
+
+      setRegisteredUsers([
+        { id: `USR-${Math.floor(100 + Math.random() * 900)}`, name: newUser.name, contact: newUser.phone, provider: 'Phone OTP', joined: 'Just Now', totalBookings: 1, status: 'Verified' },
+        ...registeredUsers
+      ]);
     } else {
-      alert('Please enter a valid 6-digit OTP code');
+      alert('Please enter a valid OTP code');
     }
   };
 
-  // STEP 2: Process Gateway Payment & Confirm Booking
   const handleProcessPayment = () => {
     if (!selectedArena) return;
     setIsProcessingPayment(true);
@@ -279,7 +339,8 @@ export default function WinDeclareApp() {
       setOtpSent(false);
       setOtpCode('');
       showToast(`🎉 Payment Successful! Ticket ID: ${newBooking.id}`);
-      setView('profile'); // Send to active bookings page after successful payment
+      setProfileTab('bookings');
+      setView('profile');
     }, 2000);
   };
 
@@ -391,6 +452,11 @@ export default function WinDeclareApp() {
                     Owner Portal
                   </span>
                 )}
+                {view === 'admin-dashboard' && (
+                  <span className="bg-purple-500/20 text-purple-400 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
+                    Admin Console
+                  </span>
+                )}
               </div>
             </div>
 
@@ -404,6 +470,19 @@ export default function WinDeclareApp() {
                 Browse Turfs
               </button>
 
+              {/* Admin Dashboard Navigation */}
+              <button 
+                onClick={() => setView('admin-dashboard')}
+                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition ${
+                  view === 'admin-dashboard' 
+                    ? 'bg-purple-500 text-white border-purple-500 shadow-lg shadow-purple-500/20' 
+                    : 'border-purple-500/30 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20'
+                }`}
+              >
+                <Shield className="w-4 h-4" />
+                <span className="hidden sm:inline">Admin Console</span>
+              </button>
+
               <button 
                 onClick={() => setView('owner-portal')}
                 className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition ${
@@ -413,30 +492,69 @@ export default function WinDeclareApp() {
                 }`}
               >
                 <Building2 className="w-4 h-4" />
-                <span>Owner Dashboard</span>
+                <span className="hidden sm:inline">Owner Dashboard</span>
               </button>
 
-              <button 
-                onClick={() => setView('profile')}
-                className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border transition relative ${
-                  view === 'profile'
-                    ? 'bg-amber-500 text-black font-bold border-amber-400'
-                    : 'text-gray-300 hover:text-white bg-gray-900 border-gray-800'
-                }`}
-              >
-                <User className="w-4 h-4" />
-                <span>My Bookings</span>
-                {myBookings.length > 0 && (
-                  <span className="ml-1 bg-amber-400 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full">
-                    {myBookings.length}
-                  </span>
+              {/* PROFILE ICON DROPDOWN MENU */}
+              <div className="relative">
+                <button 
+                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                  className="flex items-center gap-2 text-xs font-semibold text-gray-300 bg-gray-900 border border-gray-800 px-3 py-2 rounded-xl hover:border-amber-500/50 transition"
+                >
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black flex items-center justify-center text-[10px]">
+                    {currentUser ? currentUser.name.charAt(0) : <User className="w-3.5 h-3.5" />}
+                  </div>
+                  <span className="hidden sm:inline font-bold">{currentUser ? currentUser.name : 'Account'}</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                </button>
+
+                {/* Profile Dropdown Items */}
+                {isProfileMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-[#0e1320] border border-gray-800 rounded-2xl shadow-2xl p-2 z-50 space-y-1">
+                    <div className="px-3 py-2 border-b border-gray-800">
+                      <p className="text-xs font-bold text-white">{currentUser?.name || 'Guest Player'}</p>
+                      <p className="text-[10px] text-gray-400 truncate">{currentUser?.phone || currentUser?.email || 'Not logged in'}</p>
+                    </div>
+
+                    <button 
+                      onClick={() => { setProfileTab('bookings'); setView('profile'); setIsProfileMenuOpen(false); }}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 rounded-xl transition"
+                    >
+                      <span className="flex items-center gap-2"><Calendar className="w-3.5 h-3.5" /> My Bookings</span>
+                      <span className="bg-amber-500 text-black font-black text-[10px] px-1.5 rounded-full">{myBookings.length}</span>
+                    </button>
+
+                    <button 
+                      onClick={() => { setProfileTab('favorites'); setView('profile'); setIsProfileMenuOpen(false); }}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 rounded-xl transition"
+                    >
+                      <span className="flex items-center gap-2"><Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> Favorite Turfs</span>
+                      <span className="text-gray-400 text-[10px]">{favoriteArenaIds.length}</span>
+                    </button>
+
+                    <button 
+                      onClick={() => { setProfileTab('account'); setView('profile'); setIsProfileMenuOpen(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 rounded-xl transition"
+                    >
+                      <Settings className="w-3.5 h-3.5" /> Account Settings
+                    </button>
+
+                    <div className="pt-1 border-t border-gray-800">
+                      <button 
+                        onClick={() => { setCurrentUser(null); setIsProfileMenuOpen(false); showToast('Signed out successfully'); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-xl transition font-semibold"
+                      >
+                        <LogOut className="w-3.5 h-3.5" /> Sign Out
+                      </button>
+                    </div>
+                  </div>
                 )}
-              </button>
+              </div>
             </div>
           </div>
         </header>
 
-        {/* VIEW 1: LANDING PAGE (WITH DISTANCE + NAVIGATE BUTTON) */}
+        {/* VIEW 1: LANDING PAGE */}
         {view === 'browse' && (
           <main className="max-w-7xl mx-auto px-4 py-8">
             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -473,31 +591,50 @@ export default function WinDeclareApp() {
               </button>
             </div>
 
-            {/* Search & Filters */}
-            <div className="bg-[#0e131f] border border-gray-800/80 rounded-2xl p-4 mb-6 flex flex-wrap gap-4 items-center justify-between shadow-xl">
-              <div className="flex-1 min-w-[280px] relative">
-                <Search className="w-4 h-4 absolute left-3 top-3.5 text-gray-500" />
-                <input 
-                  type="text" 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by arena name, location (e.g. Addagutta, Gachibowli)..." 
-                  className="w-full bg-[#070b12] border border-gray-800 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:border-amber-500 text-white"
-                />
+            {/* Sports Filter & Search Bar */}
+            <div className="bg-[#0e131f] border border-gray-800/80 rounded-2xl p-4 mb-6 space-y-4 shadow-xl">
+              <div className="flex flex-wrap gap-4 items-center justify-between">
+                <div className="flex-1 min-w-[280px] relative">
+                  <Search className="w-4 h-4 absolute left-3 top-3.5 text-gray-500" />
+                  <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search by arena name, location (e.g. Addagutta, Gachibowli)..." 
+                    className="w-full bg-[#070b12] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 text-white"
+                  />
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-400 font-medium uppercase">Max Price:</span>
+                  <input 
+                    type="range" 
+                    min="300" 
+                    max="5000" 
+                    step="100" 
+                    value={maxPrice} 
+                    onChange={(e) => setMaxPrice(Number(e.target.value))}
+                    className="accent-amber-500 cursor-pointer"
+                  />
+                  <span className="text-sm font-bold text-amber-400 min-w-[80px]">₹{maxPrice}/hr</span>
+                </div>
               </div>
 
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-400 font-medium uppercase">Max Price:</span>
-                <input 
-                  type="range" 
-                  min="300" 
-                  max="5000" 
-                  step="100" 
-                  value={maxPrice} 
-                  onChange={(e) => setMaxPrice(Number(e.target.value))}
-                  className="accent-amber-500 cursor-pointer"
-                />
-                <span className="text-sm font-bold text-amber-400 min-w-[80px]">₹{maxPrice}/hr</span>
+              {/* Sports Chips */}
+              <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar border-t border-gray-800/60 pt-3">
+                {['All', ...sportsList].map((sport) => (
+                  <button
+                    key={sport}
+                    onClick={() => setSelectedSport(sport)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
+                      selectedSport === sport
+                        ? 'bg-amber-500 text-black font-extrabold shadow-md'
+                        : 'bg-[#080c14] border border-gray-800 text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    {sport}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -510,19 +647,29 @@ export default function WinDeclareApp() {
                     ? calculateDistance(userLocation.lat, userLocation.lng, arena.lat, arena.lng)
                     : null;
 
+                  const isFav = favoriteArenaIds.includes(arena.id);
+
                   return (
                     <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-amber-500/40 transition flex flex-col justify-between shadow-xl group">
                       <div>
                         <div className="relative h-48 bg-gray-950 overflow-hidden">
                           <img src={arena.image} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
                           
+                          {/* Favorite Button */}
+                          <button 
+                            onClick={(e) => toggleFavorite(arena.id, e)}
+                            className="absolute top-3 right-3 bg-black/60 backdrop-blur p-2 rounded-xl border border-white/10 hover:scale-110 transition z-10"
+                          >
+                            <Heart className={`w-4 h-4 ${isFav ? 'fill-rose-500 text-rose-500' : 'text-white'}`} />
+                          </button>
+
                           {distance && (
                             <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-amber-500/40 text-amber-400 text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
                               <Navigation className="w-3 h-3 fill-amber-400" /> {distance} km away
                             </div>
                           )}
 
-                          <div className="absolute top-3 right-3 bg-black/80 backdrop-blur text-xs font-bold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1">
+                          <div className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-bold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1">
                             <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> {arena.rating} ({arena.reviews})
                           </div>
                         </div>
@@ -533,6 +680,14 @@ export default function WinDeclareApp() {
                             <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
                               <MapPin className="w-3.5 h-3.5 text-amber-500" /> {arena.location}
                             </p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {arena.sports.map(s => (
+                              <span key={s} className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
+                                {s}
+                              </span>
+                            ))}
                           </div>
                         </div>
                       </div>
@@ -553,7 +708,6 @@ export default function WinDeclareApp() {
                             </button>
                           </div>
 
-                          {/* RESTORED NAVIGATE BUTTON */}
                           <button 
                             onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
                             className="w-full py-2 bg-[#080c14] hover:bg-gray-900 border border-teal-500/30 text-teal-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
@@ -595,6 +749,7 @@ export default function WinDeclareApp() {
             </div>
 
             <div className="bg-[#0b101d] border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6">
+              {/* Date Selection */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-amber-500" /> SELECT DATE
@@ -617,6 +772,7 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
+              {/* Slot Selection */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5 text-amber-500" /> AVAILABLE SLOTS
@@ -644,6 +800,7 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
+              {/* Checkout Bar with Auth Options */}
               {selectedSlots.length > 0 && (
                 <div className="pt-4 border-t border-gray-800 space-y-4">
                   <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 flex items-center justify-between">
@@ -656,52 +813,193 @@ export default function WinDeclareApp() {
                     </div>
                   </div>
 
-                  {!otpSent ? (
-                    <form onSubmit={handleSendOtp} className="space-y-3">
-                      <div className="relative">
-                        <Phone className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
+                  {/* Dual Auth Switcher: Phone OTP or Google Sign In */}
+                  <div className="space-y-3">
+                    <div className="flex bg-[#080c14] p-1 rounded-xl border border-gray-800">
+                      <button 
+                        type="button"
+                        onClick={() => setAuthMode('phone')}
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${authMode === 'phone' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                      >
+                        Phone OTP
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setAuthMode('google')}
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${authMode === 'google' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                      >
+                        Google Auth
+                      </button>
+                    </div>
+
+                    {authMode === 'google' ? (
+                      <button 
+                        type="button"
+                        onClick={handleGoogleSignIn}
+                        className="w-full py-3 bg-white text-black font-extrabold text-xs rounded-xl hover:bg-gray-100 transition shadow-lg flex items-center justify-center gap-2"
+                      >
+                        <Mail className="w-4 h-4 text-red-500" /> Continue with Google & Pay ₹{totalPrice}
+                      </button>
+                    ) : !otpSent ? (
+                      <form onSubmit={handleSendOtp} className="space-y-3">
+                        <div className="relative">
+                          <Phone className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
+                          <input 
+                            type="tel"
+                            required
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            placeholder="Enter mobile number for OTP"
+                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                        <button 
+                          type="submit"
+                          className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg"
+                        >
+                          Send OTP & Continue
+                        </button>
+                      </form>
+                    ) : (
+                      <form onSubmit={handleVerifyOtp} className="space-y-3">
                         <input 
-                          type="tel"
+                          type="text"
+                          maxLength={6}
                           required
-                          value={phoneNumber}
-                          onChange={(e) => setPhoneNumber(e.target.value)}
-                          placeholder="Enter mobile number for OTP"
-                          className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                          value={otpCode}
+                          onChange={(e) => setOtpCode(e.target.value)}
+                          placeholder="Enter 6-digit OTP code"
+                          className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-center text-sm font-mono text-amber-400 tracking-widest focus:outline-none focus:border-amber-500"
                         />
-                      </div>
-                      <button 
-                        type="submit"
-                        className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg"
-                      >
-                        Send OTP & Continue
-                      </button>
-                    </form>
-                  ) : (
-                    <form onSubmit={handleVerifyOtp} className="space-y-3">
-                      <input 
-                        type="text"
-                        maxLength={6}
-                        required
-                        value={otpCode}
-                        onChange={(e) => setOtpCode(e.target.value)}
-                        placeholder="Enter 6-digit OTP code"
-                        className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-center text-sm font-mono text-amber-400 tracking-widest focus:outline-none focus:border-amber-500"
-                      />
-                      <button 
-                        type="submit"
-                        className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg flex items-center justify-center gap-2"
-                      >
-                        <ShieldCheck className="w-4 h-4" /> Verify OTP & Proceed to Payment
-                      </button>
-                    </form>
-                  )}
+                        <button 
+                          type="submit"
+                          className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg flex items-center justify-center gap-2"
+                        >
+                          <ShieldCheck className="w-4 h-4" /> Verify OTP & Proceed to Payment
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           </main>
         )}
 
-        {/* VIEW 3: OWNER PORTAL WITH SIDEBAR */}
+        {/* VIEW 3: ADMIN CONSOLE DASHBOARD */}
+        {view === 'admin-dashboard' && (
+          <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+            <div>
+              <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                Super Admin Console
+              </span>
+              <h1 className="text-3xl font-extrabold text-white mt-1">Platform Metrics & Registered Users</h1>
+              <p className="text-xs text-gray-400 mt-1">Real-time database records of registered players and authentications</p>
+            </div>
+
+            {/* Admin Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-[#0e1320] border border-purple-500/30 rounded-2xl p-4 shadow-xl">
+                <div className="flex items-center gap-3">
+                  <div className="bg-purple-500/20 text-purple-400 p-2.5 rounded-xl border border-purple-500/30">
+                    <Users className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-black text-white">{registeredUsers.length}</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">Registered Players</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0e1320] border border-amber-500/30 rounded-2xl p-4 shadow-xl">
+                <div className="flex items-center gap-3">
+                  <div className="bg-amber-500/20 text-amber-400 p-2.5 rounded-xl border border-amber-500/30">
+                    <Trophy className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-black text-white">{arenas.length}</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">Active Venues</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0e1320] border border-emerald-500/30 rounded-2xl p-4 shadow-xl">
+                <div className="flex items-center gap-3">
+                  <div className="bg-emerald-500/20 text-emerald-400 p-2.5 rounded-xl border border-emerald-500/30">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-black text-white">{myBookings.length}</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">Total Bookings</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#0e1320] border border-teal-500/30 rounded-2xl p-4 shadow-xl">
+                <div className="flex items-center gap-3">
+                  <div className="bg-teal-500/20 text-teal-400 p-2.5 rounded-xl border border-teal-500/30">
+                    <IndianRupee className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-black text-amber-400 font-mono">₹{myBookings.reduce((acc, curr) => acc + curr.amount, 0)}</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">Total Gross GMV</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Registered Users Table */}
+            <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-purple-400" /> User Directory
+                </h3>
+                <span className="text-xs text-gray-400">Showing {registeredUsers.length} verified records</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-gray-400 font-bold uppercase text-[10px]">
+                      <th className="py-3 px-4">User ID</th>
+                      <th className="py-3 px-4">Full Name</th>
+                      <th className="py-3 px-4">Contact Detail</th>
+                      <th className="py-3 px-4">Auth Method</th>
+                      <th className="py-3 px-4">Joined Date</th>
+                      <th className="py-3 px-4">Bookings</th>
+                      <th className="py-3 px-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800/60">
+                    {registeredUsers.map((usr) => (
+                      <tr key={usr.id} className="hover:bg-gray-900/50 transition">
+                        <td className="py-3.5 px-4 font-mono font-bold text-purple-400">{usr.id}</td>
+                        <td className="py-3.5 px-4 font-bold text-white">{usr.name}</td>
+                        <td className="py-3.5 px-4 text-gray-300 font-mono">{usr.contact}</td>
+                        <td className="py-3.5 px-4">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            usr.provider === 'Google Auth' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                          }`}>
+                            {usr.provider}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-gray-400">{usr.joined}</td>
+                        <td className="py-3.5 px-4 font-bold text-white">{usr.totalBookings}</td>
+                        <td className="py-3.5 px-4">
+                          <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                            ✓ {usr.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </main>
+        )}
+
+        {/* VIEW 4: OWNER PORTAL WITH SIDEBAR */}
         {view === 'owner-portal' && (
           <div className="min-h-[calc(100vh-64px)] flex">
             {/* Sidebar Navigation */}
@@ -1003,7 +1301,7 @@ export default function WinDeclareApp() {
                           <p className="text-xs text-gray-400 flex items-center gap-2">
                             <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
                           </p>
-                          <p className="text-[11px] text-gray-500">Player Contact: +91 {phoneNumber || '9876543210'}</p>
+                          <p className="text-[11px] text-gray-500">Player Contact: {currentUser?.phone || '+91 9505737751'}</p>
                         </div>
 
                         <div className="sm:text-right space-y-1">
@@ -1157,7 +1455,7 @@ export default function WinDeclareApp() {
                           required
                           value={ticketCode}
                           onChange={(e) => setTicketCode(e.target.value)}
-                          placeholder="e.g. WD-43R5KMN70"
+                          placeholder="e.g. WD-09TKPU8"
                           className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-11 pr-4 py-3 text-sm font-mono text-white tracking-widest uppercase focus:outline-none focus:border-amber-500"
                         />
                       </div>
@@ -1214,56 +1512,142 @@ export default function WinDeclareApp() {
           </div>
         )}
 
-        {/* VIEW 4: MY BOOKINGS (ACTIVE BOOKINGS) */}
+        {/* VIEW 5: USER PROFILE VIEW (BOOKINGS, FAVORITES, ACCOUNT) */}
         {view === 'profile' && (
-          <main className="max-w-2xl mx-auto px-4 py-8 space-y-6">
-            <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 flex items-center justify-between shadow-xl">
+          <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+            <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black text-lg flex items-center justify-center">
-                  PL
+                <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black text-xl flex items-center justify-center shadow-lg">
+                  {currentUser ? currentUser.name.charAt(0) : 'P'}
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-white">Verified Player</h2>
-                  <p className="text-xs text-gray-400">+91 {phoneNumber || '9876543210'}</p>
+                  <h2 className="text-xl font-extrabold text-white">{currentUser?.name || 'Guest Player'}</h2>
+                  <p className="text-xs text-gray-400 font-mono mt-0.5">{currentUser?.phone || currentUser?.email || 'Guest Session'}</p>
+                  <span className="inline-block mt-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                    ✓ Verified Player
+                  </span>
                 </div>
               </div>
 
-              <div className="flex gap-6 text-center">
-                <div>
-                  <p className="text-xl font-bold text-white">{myBookings.length}</p>
-                  <p className="text-xs text-gray-500 uppercase font-bold">Total</p>
-                </div>
-                <div>
-                  <p className="text-xl font-bold text-emerald-400">{myBookings.length}</p>
-                  <p className="text-xs text-gray-500 uppercase font-bold">Confirmed</p>
-                </div>
+              {/* Profile Sub-Tabs */}
+              <div className="flex gap-1 bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
+                <button
+                  onClick={() => setProfileTab('bookings')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'bookings' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                >
+                  My Bookings ({myBookings.length})
+                </button>
+                <button
+                  onClick={() => setProfileTab('favorites')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'favorites' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                >
+                  Favorites ({favoriteArenaIds.length})
+                </button>
+                <button
+                  onClick={() => setProfileTab('account')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'account' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                >
+                  Settings
+                </button>
               </div>
             </div>
 
-            <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
-              <h3 className="text-base font-bold text-white">Active Bookings</h3>
+            {/* TAB CONTENT: BOOKINGS */}
+            {profileTab === 'bookings' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-amber-500" /> Active & Upcoming Bookings
+                </h3>
 
-              <div className="space-y-3">
-                {myBookings.map((b) => (
-                  <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
-                    <div className="space-y-1">
-                      <span className="text-[10px] font-bold text-amber-500 uppercase">{b.id}</span>
-                      <h4 className="font-bold text-white text-sm">{b.arenaTitle}</h4>
-                      <p className="text-xs text-gray-400 flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
-                      </p>
-                    </div>
+                <div className="space-y-3">
+                  {myBookings.map((b) => (
+                    <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-amber-500 uppercase font-mono">{b.id}</span>
+                        <h4 className="font-bold text-white text-sm">{b.arenaTitle}</h4>
+                        <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
+                        </p>
+                      </div>
 
-                    <div className="text-right">
-                      <span className="text-sm font-black text-amber-400 block font-mono">₹{b.amount}</span>
-                      <span className="text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded font-bold inline-block mt-1">
-                        ✓ Confirmed
-                      </span>
+                      <div className="text-right">
+                        <span className="text-sm font-black text-amber-400 block font-mono">₹{b.amount}</span>
+                        <span className="text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded font-bold inline-block mt-1">
+                          ✓ Confirmed
+                        </span>
+                      </div>
                     </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB CONTENT: FAVORITES */}
+            {profileTab === 'favorites' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Heart className="w-4 h-4 text-rose-500 fill-rose-500" /> Saved Favorite Turfs
+                </h3>
+
+                <div className="grid md:grid-cols-2 gap-4">
+                  {arenas.filter(a => favoriteArenaIds.includes(a.id)).map((arena) => (
+                    <div key={arena.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img src={arena.image} alt={arena.title} className="w-12 h-12 rounded-lg object-cover" />
+                        <div>
+                          <h4 className="font-bold text-white text-xs">{arena.title}</h4>
+                          <p className="text-[10px] text-gray-400">{arena.location}</p>
+                          <p className="text-[10px] font-bold text-amber-400 mt-0.5">₹{arena.price}/hr • ★ {arena.rating}</p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => handleSelectArena(arena)}
+                        className="px-3 py-1.5 bg-amber-500 text-black text-xs font-bold rounded-lg"
+                      >
+                        Book
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB CONTENT: ACCOUNT SETTINGS */}
+            {profileTab === 'account' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-amber-500" /> Player Profile & Security Settings
+                </h3>
+
+                <div className="space-y-3 max-w-md">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Display Name</label>
+                    <input 
+                      type="text" 
+                      value={currentUser?.name || ''} 
+                      onChange={(e) => setCurrentUser(currentUser ? { ...currentUser, name: e.target.value } : null)}
+                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2 text-xs text-white" 
+                    />
                   </div>
-                ))}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Contact Phone / Email</label>
+                    <input 
+                      type="text" 
+                      readOnly
+                      value={currentUser?.phone || currentUser?.email || 'N/A'} 
+                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2 text-xs text-gray-400 font-mono" 
+                    />
+                  </div>
+
+                  <button 
+                    onClick={() => showToast('Profile details saved!')}
+                    className="px-4 py-2 bg-amber-500 text-black text-xs font-extrabold rounded-xl shadow-lg"
+                  >
+                    Save Preferences
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </main>
         )}
       </div>
