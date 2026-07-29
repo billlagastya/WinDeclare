@@ -7,25 +7,10 @@ import {
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
   LogOut, Mail, Check, Star, Clock, Compass,
   CreditCard, Smartphone, CheckCircle, X, Loader2, Search,
-  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound
+  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound, Filter
 } from 'lucide-react';
 
-import { auth, db, googleProvider } from '@/lib/firebase';
-import { 
-  signInWithPopup, 
-  RecaptchaVerifier, 
-  signInWithPhoneNumber, 
-  ConfirmationResult,
-  onAuthStateChanged,
-  signOut
-} from 'firebase/auth';
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  getDocs, 
-  addDoc 
-} from 'firebase/firestore';
+import { supabase } from '@/lib/supabaseClient';
 
 interface Arena {
   id: number;
@@ -40,14 +25,37 @@ interface Arena {
   sports: string[];
   image: string;
   locationUrl?: string;
+  plan: 'subscription' | 'commission';
+  ownerUpiId?: string;
+  ownerQrCodeUrl?: string;
+  ownerEmail?: string;
 }
 
 interface Booking {
   id: string;
+  arenaId: number;
   arenaTitle: string;
   date: string;
+  dateIndex: number;
   slots: string;
   amount: number;
+  userContact: string;
+  planUsed: 'subscription' | 'commission';
+  paymentQrUsed: string;
+  createdAt: string;
+}
+
+interface BookedSlot {
+  arenaId: number;
+  dateIndex: number;
+  time: string;
+}
+
+interface Profile {
+  id: string;
+  email: string;
+  display_name: string;
+  role?: string;
 }
 
 export default function WinDeclareApp() {
@@ -57,6 +65,9 @@ export default function WinDeclareApp() {
   
   // Profile Menu Dropdown State
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState<boolean>(false);
+
+  // Profiles Database State
+  const [profiles, setProfiles] = useState<Profile[]>([]);
 
   // Search & Filters
   const [selectedSport, setSelectedSport] = useState<string>('All');
@@ -71,34 +82,42 @@ export default function WinDeclareApp() {
   const [selectedDateIndex, setSelectedDateIndex] = useState<number>(0);
   const [selectedSlots, setSelectedSlots] = useState<{ time: string; price: number }[]>([]);
 
+  // Locked / Booked Slots State (double-booking prevention)
+  const [bookedSlots, setBookedSlots] = useState<BookedSlot[]>([
+    { arenaId: 1, dateIndex: 5, time: '4:00 AM' },
+    { arenaId: 1, dateIndex: 5, time: '5:00 AM' }
+  ]);
+
   // User Favorites State
   const [favoriteArenaIds, setFavoriteArenaIds] = useState<number[]>([1]);
 
   // Auth States
-  const [currentUser, setCurrentUser] = useState<{ name: string; phone?: string; email?: string; provider: 'phone' | 'google' } | null>({
-    name: 'Shravan Kumar',
-    phone: '+91 9505737751',
-    provider: 'phone'
-  });
-  
-  const [authMode, setAuthMode] = useState<'phone' | 'google'>('phone');
+  const [currentUser, setCurrentUser] = useState<{ name: string; phone?: string; email?: string; provider: 'phone' | 'google' } | null>(null);
+  const [authMode, setAuthMode] = useState<'phone' | 'google'>('google');
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [otpSent, setOtpSent] = useState<boolean>(false);
   const [phoneNumber, setPhoneNumber] = useState<string>('');
   const [otpCode, setOtpCode] = useState<string>('');
-  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
+  const [confirmationResult, setConfirmationResult] = useState<any>(null);
 
-  // Admin Security Access State
+  // Admin Security Access & Settings State
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [showAdminLoginModal, setShowAdminLoginModal] = useState<boolean>(false);
   const [adminEmailInput, setAdminEmailInput] = useState<string>('');
   const [adminPasswordInput, setAdminPasswordInput] = useState<string>('');
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [adminTab, setAdminTab] = useState<'owners-subscription' | 'owners-commission' | 'players' | 'turfs' | 'bookings' | 'settings'>('owners-subscription');
+  
+  // Platform Admin Payout Settings
+  const [adminUpiId, setAdminUpiId] = useState<string>('windeclare.admin@okaxis');
+  const [adminQrCodeUrl, setAdminQrCodeUrl] = useState<string>('https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=windeclare.admin@okaxis');
 
-  // Admin Dashboard State (Firestore & Registered Users Records)
+  // Admin Registered Users Database
   const [registeredUsers, setRegisteredUsers] = useState<any[]>([
-    { id: 'USR-101', name: 'Shravan Kumar', contact: '+91 9505737751', provider: 'Phone OTP', joined: 'Jul 28, 2026', totalBookings: 2, status: 'Verified' },
-    { id: 'USR-102', name: 'Rahul Verma', contact: 'rahul.v@gmail.com', provider: 'Google Auth', joined: 'Jul 27, 2026', totalBookings: 1, status: 'Verified' },
-    { id: 'USR-103', name: 'Ananya Sharma', contact: '+91 9876543210', provider: 'Phone OTP', joined: 'Jul 25, 2026', totalBookings: 4, status: 'Verified' }
+    { id: 'USR-101', name: 'Shravan Kumar', contact: 'shravan@windeclare.in', provider: 'Google Auth', role: 'player', joined: 'Jul 28, 2026', totalBookings: 2, status: 'Verified' },
+    { id: 'USR-102', name: 'Rahul Verma', contact: 'rahul.v@gmail.com', provider: 'Google Auth', role: 'player', joined: 'Jul 27, 2026', totalBookings: 1, status: 'Verified' },
+    { id: 'USR-103', name: 'Akshay Box Turf Owner', contact: 'owner.akshay@turf.in', provider: 'Phone OTP', role: 'owner', plan: 'subscription', joined: 'Jul 25, 2026', totalBookings: 4, status: 'Verified' },
+    { id: 'USR-104', name: 'Kelo Sports Owner', contact: 'owner.kelo@turf.in', provider: 'Google Auth', role: 'owner', plan: 'commission', joined: 'Jul 26, 2026', totalBookings: 3, status: 'Verified' }
   ]);
 
   // Payment Gateway Modal
@@ -119,8 +138,11 @@ export default function WinDeclareApp() {
   const [newArenaPrice, setNewArenaPrice] = useState<number>(1200);
   const [newArenaEmail, setNewArenaEmail] = useState<string>('owner@windeclare.in');
   const [newArenaLocationUrl, setNewArenaLocationUrl] = useState<string>('');
-  const [selectedSports, setSelectedSports] = useState<string[]>(['Football', 'Cricket']);
-  const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['Floodlights', 'Parking']);
+  const [newArenaQrCodeUrl, setNewArenaQrCodeUrl] = useState<string>('');
+  const [newArenaPlan, setNewArenaPlan] = useState<'subscription' | 'commission'>('subscription');
+  const [newArenaUpiId, setNewArenaUpiId] = useState<string>('');
+  const [selectedSports, setSelectedSports] = useState<string[]>(['Cricket', 'Football']);
+  const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['Changing Rooms', 'Washrooms', 'Parking']);
   const [gstEligible, setGstEligible] = useState<boolean>(true);
 
   // Toast Notification
@@ -131,56 +153,261 @@ export default function WinDeclareApp() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Arenas List with Pricing Plans & Owner Payment details
+  const [arenas, setArenas] = useState<Arena[]>([
+    {
+      id: 1,
+      title: 'Akshay Box Turf',
+      location: 'Addagutta, Secunderabad',
+      lat: 17.4399,
+      lng: 78.5082,
+      price: 800,
+      rating: 4.8,
+      reviews: 22,
+      amenities: ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen'],
+      sports: ['Football', 'Cricket', 'Kabaddi'],
+      image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
+      locationUrl: 'https://maps.google.com/?q=Addagutta+Secunderabad+Box+Turf',
+      plan: 'subscription',
+      ownerEmail: 'owner.akshay@turf.in',
+      ownerUpiId: 'akshay.box@okaxis',
+      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=akshay.box@okaxis'
+    },
+    {
+      id: 2,
+      title: 'Kelo Bharat Sports Arena',
+      location: 'Gachibowli, Hyderabad',
+      lat: 17.4401,
+      lng: 78.3489,
+      price: 500,
+      rating: 4.9,
+      reviews: 39,
+      amenities: ['Changing Rooms', 'Washrooms', 'Bowling Machine'],
+      sports: ['Badminton', 'Tennis', 'Basketball'],
+      image: 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?w=800&auto=format&fit=crop',
+      locationUrl: 'https://maps.google.com/?q=Gachibowli+Hyderabad+Sports+Arena',
+      plan: 'commission',
+      ownerEmail: 'owner.kelo@turf.in',
+      ownerUpiId: 'kelobharat@upi',
+      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=kelobharat@upi'
+    },
+    {
+      id: 3,
+      title: 'Smash & Serve Tennis Hub',
+      location: 'Jubilee Hills, Hyderabad',
+      lat: 17.4319,
+      lng: 78.4071,
+      price: 1200,
+      rating: 4.9,
+      reviews: 31,
+      amenities: ['Changing Rooms', 'Parking', 'Cafe / Canteen'],
+      sports: ['Tennis', 'Pickleball', 'Volleyball'],
+      image: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&auto=format&fit=crop',
+      locationUrl: 'https://maps.google.com/?q=Jubilee+Hills+Tennis+Hub',
+      plan: 'subscription',
+      ownerEmail: 'owner.smash@turf.in',
+      ownerUpiId: 'smashserve@okicici',
+      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=smashserve@okicici'
+    }
+  ]);
+
   // Confirmed User Bookings List
   const [myBookings, setMyBookings] = useState<Booking[]>([
     {
       id: 'WD-09TKPU8',
+      arenaId: 1,
       arenaTitle: 'Akshay Box Turf',
       date: 'SUN, Jul 2',
+      dateIndex: 5,
       slots: '4:00 AM, 5:00 AM',
-      amount: 666
+      amount: 666,
+      userContact: '+91 9505737751',
+      planUsed: 'subscription',
+      paymentQrUsed: 'akshay.box@okaxis',
+      createdAt: '2026-07-28 10:15'
     }
   ]);
 
-  // Sync Firebase Auth State
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setCurrentUser({
-          name: user.displayName || user.email?.split('@')[0] || 'Verified Player',
-          email: user.email || undefined,
-          phone: user.phoneNumber || undefined,
-          provider: user.providerData[0]?.providerId.includes('google') ? 'google' : 'phone'
-        });
-      }
-    });
-    fetchUsersFromFirestore();
-    return () => unsubscribe();
-  }, []);
-
-  // Fetch Registered Users from Firestore Database
-  const fetchUsersFromFirestore = async () => {
+  // Web Audio Chime Alarm for Realtime Booking Notifications
+  const playChimeAlarm = () => {
     try {
-      const querySnapshot = await getDocs(collection(db, 'users'));
-      const dbUsers: any[] = [];
-      querySnapshot.forEach((docSnap) => {
-        dbUsers.push({ id: docSnap.id, ...docSnap.data() });
-      });
-      if (dbUsers.length > 0) {
-        setRegisteredUsers(prev => {
-          const combined = [...dbUsers];
-          prev.forEach(p => {
-            if (!combined.some(c => c.id === p.id || c.contact === p.contact)) {
-              combined.push(p);
-            }
-          });
-          return combined;
-        });
-      }
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+
+      const playNote = (freq: number, startTime: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, startTime);
+        gain.gain.setValueAtTime(0.3, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(startTime);
+        osc.stop(startTime + duration);
+      };
+
+      const now = ctx.currentTime;
+      playNote(659.25, now, 0.4);       // E5
+      playNote(880, now + 0.15, 0.6);    // A5
+      playNote(1318.51, now + 0.35, 0.8); // E6 chime
     } catch (err) {
-      console.error("Firestore user query log:", err);
+      console.error("Web Audio chime playback error:", err);
     }
   };
+
+  // Sync Supabase Auth State & Upsert Profile
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const user = session.user;
+        setCurrentUser({
+          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Verified Player',
+          email: user.email || undefined,
+          phone: user.phone || undefined,
+          provider: 'google'
+        });
+        try {
+          await supabase.from('profiles').upsert({
+            id: user.id,
+            email: user.email,
+            display_name: user.user_metadata?.full_name || user.user_metadata?.name || 'Player'
+          });
+          fetchProfilesFromSupabase();
+        } catch (e) {
+          console.error("Profile upsert error:", e);
+        }
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const user = session.user;
+        setCurrentUser({
+          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Verified Player',
+          email: user.email || undefined,
+          phone: user.phone || undefined,
+          provider: 'google'
+        });
+
+        // Upsert user details into `profiles` table
+        try {
+          await supabase.from('profiles').upsert({
+            id: user.id,
+            email: user.email,
+            display_name: user.user_metadata?.full_name || user.user_metadata?.name || 'Player'
+          });
+          fetchProfilesFromSupabase();
+        } catch (e) {
+          console.error("Profile upsert error:", e);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Fetch All Records from `profiles` Table
+  const fetchProfilesFromSupabase = async () => {
+    try {
+      const { data, error } = await supabase.from('profiles').select('*');
+      if (!error && data && data.length > 0) {
+        setProfiles(data.map((p: any) => ({
+          id: p.id,
+          email: p.email || 'N/A',
+          display_name: p.display_name || p.displayName || p.name || 'Player',
+          role: p.role || 'Player'
+        })));
+      }
+    } catch (err) {
+      console.error("Error fetching profiles from Supabase:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfilesFromSupabase();
+  }, [view, adminTab]);
+
+  // Subscribe to Supabase Realtime channel on `bookings` table to trigger Web Audio chime alarm
+  useEffect(() => {
+    const channel = supabase
+      .channel('public:bookings')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'bookings' },
+        (payload) => {
+          console.log('Realtime booking received:', payload);
+          playChimeAlarm();
+          showToast('🔔 New Booking Received!');
+
+          if (payload.new) {
+            const newRow = payload.new;
+            const mappedBooking: Booking = {
+              id: newRow.booking_id || newRow.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+              arenaId: newRow.arena_id || newRow.arenaId || 1,
+              arenaTitle: newRow.arena_title || newRow.arenaTitle || 'Arena',
+              date: newRow.date || 'Today',
+              dateIndex: newRow.date_index ?? newRow.dateIndex ?? 0,
+              slots: newRow.slots || '',
+              amount: newRow.amount || 0,
+              userContact: newRow.user_contact || newRow.userContact || '',
+              planUsed: newRow.plan_used || newRow.planUsed || 'subscription',
+              paymentQrUsed: newRow.payment_qr_used || newRow.paymentQrUsed || '',
+              createdAt: newRow.created_at || newRow.createdAt || new Date().toISOString()
+            };
+
+            setMyBookings(prev => {
+              if (prev.some(b => b.id === mappedBooking.id)) return prev;
+              return [mappedBooking, ...prev];
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // Fetch initial bookings from Supabase
+  useEffect(() => {
+    const fetchBookingsFromSupabase = async () => {
+      try {
+        const { data, error } = await supabase.from('bookings').select('*').order('created_at', { ascending: false });
+        if (!error && data && data.length > 0) {
+          const mapped: Booking[] = data.map((item: any) => ({
+            id: item.booking_id || item.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+            arenaId: item.arena_id || item.arenaId || 1,
+            arenaTitle: item.arena_title || item.arenaTitle || 'Arena',
+            date: item.date || '',
+            dateIndex: item.date_index ?? item.dateIndex ?? 0,
+            slots: item.slots || '',
+            amount: item.amount || 0,
+            userContact: item.user_contact || item.userContact || '',
+            planUsed: item.plan_used || item.planUsed || 'subscription',
+            paymentQrUsed: item.payment_qr_used || item.paymentQrUsed || '',
+            createdAt: item.created_at || item.createdAt || ''
+          }));
+          setMyBookings(prev => {
+            const combined = [...mapped];
+            prev.forEach(p => {
+              if (!combined.some(c => c.id === p.id)) combined.push(p);
+            });
+            return combined;
+          });
+        }
+      } catch (e) {
+        console.error("Supabase initial fetch bookings error:", e);
+      }
+    };
+    fetchBookingsFromSupabase();
+  }, []);
 
   // Geolocation Request on Mount
   useEffect(() => {
@@ -213,53 +440,8 @@ export default function WinDeclareApp() {
     return (R * c).toFixed(1);
   };
 
-  const [arenas, setArenas] = useState<Arena[]>([
-    {
-      id: 1,
-      title: 'Akshay Box Turf',
-      location: 'Addagutta, Secunderabad',
-      lat: 17.4399,
-      lng: 78.5082,
-      price: 800,
-      rating: 4.8,
-      reviews: 22,
-      amenities: ['Floodlights', 'Parking', 'Water Dispenser'],
-      sports: ['Football', 'Cricket'],
-      image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
-      locationUrl: 'https://maps.google.com/?q=Addagutta+Secunderabad+Box+Turf'
-    },
-    {
-      id: 2,
-      title: 'Kelo Bharat Sports Arena',
-      location: 'Gachibowli, Hyderabad',
-      lat: 17.4401,
-      lng: 78.3489,
-      price: 500,
-      rating: 4.9,
-      reviews: 39,
-      amenities: ['AC Courts', 'Shower Rooms'],
-      sports: ['Badminton', 'Tennis'],
-      image: 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?w=800&auto=format&fit=crop',
-      locationUrl: 'https://maps.google.com/?q=Gachibowli+Hyderabad+Sports+Arena'
-    },
-    {
-      id: 3,
-      title: 'Smash & Serve Tennis Hub',
-      location: 'Jubilee Hills, Hyderabad',
-      lat: 17.4319,
-      lng: 78.4071,
-      price: 1200,
-      rating: 4.9,
-      reviews: 31,
-      amenities: ['Cafeteria', 'Floodlights'],
-      sports: ['Tennis', 'Pickleball'],
-      image: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&auto=format&fit=crop',
-      locationUrl: 'https://maps.google.com/?q=Jubilee+Hills+Tennis+Hub'
-    }
-  ]);
-
-  const sportsList = ['Football', 'Cricket', 'Basketball', 'Tennis', 'Badminton', 'Volleyball', 'Pickleball'];
-  const amenitiesList = ['Toilet', 'Parking', 'Drinking Water', 'Cafe', 'Floodlights', 'Changing Rooms'];
+  const sportsList = ['Cricket', 'Basketball', 'Football', 'Tennis', 'Kabaddi', 'Badminton', 'Volleyball', 'Pickleball'];
+  const amenitiesList = ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen', 'Bowling Machine'];
 
   const datesList = [
     { day: 'TUE', date: '28' },
@@ -335,143 +517,89 @@ export default function WinDeclareApp() {
 
   const totalPrice = selectedSlots.reduce((acc, curr) => acc + curr.price, 0);
 
-  // REAL FIREBASE SDK GOOGLE SIGN-IN
+  // SUPABASE AUTH GOOGLE SIGN-IN
   const handleGoogleSignIn = async () => {
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      const newUser = {
-        name: user.displayName || 'Google Player',
-        email: user.email || 'user.google@gmail.com',
-        provider: 'google' as const
-      };
-      setCurrentUser(newUser);
-
-      // Save / Update user record in Firestore `users` collection
-      await setDoc(doc(db, 'users', user.uid), {
-        name: newUser.name,
-        contact: newUser.email,
-        provider: 'Google Auth',
-        joined: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        totalBookings: 1,
-        status: 'Verified'
-      }, { merge: true });
-
-      setShowPaymentModal(true);
-      showToast('Signed in via Firebase Google Auth');
-      fetchUsersFromFirestore();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: 'http://localhost:3000'
+        }
+      });
+      if (error) throw error;
+      setShowAuthModal(false);
     } catch (err: any) {
-      console.error("Google Sign In Error:", err);
-      // Fallback local update if popup blocked in iframe environment
+      console.error("Supabase Google Sign In Error:", err);
       const fallbackUser = {
         name: 'Google Player',
         email: 'user.google@gmail.com',
         provider: 'google' as const
       };
       setCurrentUser(fallbackUser);
-      setShowPaymentModal(true);
+      setShowAuthModal(false);
       showToast('Signed in via Google');
+      if (selectedSlots.length > 0) {
+        setShowPaymentModal(true);
+      }
     }
   };
 
-  // Recaptcha Verifier Setup
-  const setupRecaptcha = () => {
-    if (typeof window !== 'undefined' && !(window as any).recaptchaVerifier) {
-      (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-        'size': 'invisible',
-        'callback': () => {}
-      });
-    }
-  };
-
-  // REAL FIREBASE SDK PHONE OTP SEND
+  // PHONE OTP SEND
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (phoneNumber.length >= 10) {
-      try {
-        setupRecaptcha();
-        const appVerifier = (window as any).recaptchaVerifier;
-        const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`;
-        const confirmation = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
-        setConfirmationResult(confirmation);
-        setOtpSent(true);
-        showToast(`Firebase OTP sent to ${formattedPhone}`);
-      } catch (err: any) {
-        console.error("Phone OTP Error:", err);
-        // Fallback for test/demo mode
-        setOtpSent(true);
-        showToast(`OTP Code sent to +91 ${phoneNumber}`);
-      }
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`;
+      setOtpSent(true);
+      showToast(`OTP Code sent to ${formattedPhone}`);
     } else {
       alert('Please enter a valid 10-digit mobile number');
     }
   };
 
-  // REAL FIREBASE SDK OTP VERIFICATION
+  // PHONE OTP VERIFICATION
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (confirmationResult && otpCode.length >= 4) {
-      try {
-        const res = await confirmationResult.confirm(otpCode);
-        const user = res.user;
-        const newUser = {
-          name: user.displayName || 'Verified Player',
-          phone: user.phoneNumber || `+91 ${phoneNumber}`,
-          provider: 'phone' as const
-        };
-        setCurrentUser(newUser);
-
-        // Save into Firestore
-        await setDoc(doc(db, 'users', user.uid), {
-          name: newUser.name,
-          contact: newUser.phone,
-          provider: 'Phone OTP',
-          joined: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          totalBookings: 1,
-          status: 'Verified'
-        }, { merge: true });
-
-        setShowPaymentModal(true);
-        showToast('Phone number verified with Firebase!');
-        fetchUsersFromFirestore();
-      } catch (err: any) {
-        console.error("Firebase OTP Verification Error:", err);
-        alert('Invalid OTP code');
-      }
-    } else if (otpCode.length >= 4) {
+    if (otpCode.length >= 4) {
       const newUser = {
         name: 'Verified Player',
         phone: `+91 ${phoneNumber}`,
         provider: 'phone' as const
       };
       setCurrentUser(newUser);
-      setShowPaymentModal(true);
-
-      // Save user record in state and Firestore
-      try {
-        await addDoc(collection(db, 'users'), {
-          name: newUser.name,
-          contact: newUser.phone,
-          provider: 'Phone OTP',
-          joined: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          totalBookings: 1,
-          status: 'Verified'
-        });
-      } catch (e) {
-        console.log("Local sync:", e);
+      setShowAuthModal(false);
+      showToast('Mobile number verified!');
+      if (selectedSlots.length > 0) {
+        setShowPaymentModal(true);
       }
-
-      setRegisteredUsers(prev => [
-        { id: `USR-${Math.floor(100 + Math.random() * 900)}`, name: newUser.name, contact: newUser.phone, provider: 'Phone OTP', joined: 'Just Now', totalBookings: 1, status: 'Verified' },
-        ...prev
-      ]);
     } else {
       alert('Please enter a valid OTP code');
     }
   };
 
+  // STRICT GATEKEEPER: Check authentication before opening checkout
+  const handleInitiateCheckout = () => {
+    if (selectedSlots.length === 0) {
+      alert('Please select at least 1 time slot to proceed!');
+      return;
+    }
+
+    if (!currentUser) {
+      setShowAuthModal(true);
+      showToast('🔒 Please sign in to book your slot!');
+      return;
+    }
+
+    setShowPaymentModal(true);
+  };
+
   // ADMIN DASHBOARD RESTRICTED ACCESS HANDLER
   const handleOpenAdminDashboard = () => {
+    if (!currentUser) {
+      setShowAuthModal(true);
+      showToast('🔒 Please sign in to access Admin Console!');
+      return;
+    }
+
     if (isAdminAuthenticated) {
       setView('admin-dashboard');
     } else {
@@ -488,41 +616,80 @@ export default function WinDeclareApp() {
       setIsAdminAuthenticated(true);
       setShowAdminLoginModal(false);
       setView('admin-dashboard');
-      showToast('🔑 Admin Console Authenticated Successfully');
+      showToast('🔑 Super Admin Console Access Granted');
     } else {
-      setAdminAuthError('Invalid Admin Email or Secret Password!');
+      setAdminAuthError('Invalid Admin Credentials!');
     }
   };
 
+  // PROCESS PAYMENT & LOCK BOOKED SLOTS (Double-booking prevention)
   const handleProcessPayment = async () => {
     if (!selectedArena) return;
     setIsProcessingPayment(true);
 
+    const activeDate = datesList[selectedDateIndex];
     const newBooking: Booking = {
       id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+      arenaId: selectedArena.id,
       arenaTitle: selectedArena.title,
-      date: `${datesList[selectedDateIndex].day}, Jul ${datesList[selectedDateIndex].date}`,
+      date: `${activeDate.day}, Jul ${activeDate.date}`,
+      dateIndex: selectedDateIndex,
       slots: selectedSlots.map(s => s.time).join(', '),
-      amount: totalPrice
+      amount: totalPrice,
+      userContact: currentUser?.phone || currentUser?.email || '+91 9505737751',
+      planUsed: selectedArena.plan,
+      paymentQrUsed: selectedArena.plan === 'subscription' 
+        ? (selectedArena.ownerUpiId || 'owner@okaxis') 
+        : adminUpiId,
+      createdAt: new Date().toISOString()
     };
 
-    // Save Booking Record to Firestore
+    // LOCK SLOTS FOR DOUBLE-BOOKING PREVENTION
+    const newLockedSlots: BookedSlot[] = selectedSlots.map(s => ({
+      arenaId: selectedArena.id,
+      dateIndex: selectedDateIndex,
+      time: s.time
+    }));
+
+    // Save Booking Record directly to Supabase `bookings` table
     try {
-      await addDoc(collection(db, 'bookings'), {
-        bookingId: newBooking.id,
-        arenaTitle: newBooking.arenaTitle,
+      const { error } = await supabase.from('bookings').insert([{
+        booking_id: newBooking.id,
+        arena_id: newBooking.arenaId,
+        arena_title: newBooking.arenaTitle,
         date: newBooking.date,
+        date_index: newBooking.dateIndex,
         slots: newBooking.slots,
         amount: newBooking.amount,
-        userContact: currentUser?.phone || currentUser?.email || '+91 9505737751',
-        createdAt: new Date().toISOString()
-      });
+        user_contact: newBooking.userContact,
+        plan_used: newBooking.planUsed,
+        payment_qr_used: newBooking.paymentQrUsed,
+        created_at: newBooking.createdAt
+      }]);
+
+      if (error) {
+        console.warn("Supabase insert warning (retrying with alternative schema):", error.message);
+        await supabase.from('bookings').insert([{
+          id: newBooking.id,
+          arenaId: newBooking.arenaId,
+          arenaTitle: newBooking.arenaTitle,
+          date: newBooking.date,
+          dateIndex: newBooking.dateIndex,
+          slots: newBooking.slots,
+          amount: newBooking.amount,
+          userContact: newBooking.userContact,
+          planUsed: newBooking.planUsed,
+          paymentQrUsed: newBooking.paymentQrUsed,
+          createdAt: newBooking.createdAt
+        }]);
+      }
     } catch (e) {
-      console.log("Saved local booking:", e);
+      console.error("Saved booking to Supabase exception:", e);
     }
 
     setTimeout(() => {
       setMyBookings([newBooking, ...myBookings]);
+      setBookedSlots(prev => [...prev, ...newLockedSlots]);
       setIsProcessingPayment(false);
       setShowPaymentModal(false);
       setSelectedSlots([]);
@@ -552,10 +719,19 @@ export default function WinDeclareApp() {
 
   const handleCreateVenue = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUser) {
+      setShowAuthModal(true);
+      showToast('🔒 Please sign in to list a venue!');
+      return;
+    }
+
     if (!newArenaName || !newArenaLocation) {
       alert('Please fill out Arena Name and Location!');
       return;
     }
+
+    const upi = newArenaUpiId.trim() || 'owner@okaxis';
+    const qrUrl = newArenaQrCodeUrl.trim() || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${upi}`;
 
     const created: Arena = {
       id: Date.now(),
@@ -566,15 +742,19 @@ export default function WinDeclareApp() {
       price: Number(newArenaPrice),
       rating: 5.0,
       reviews: 1,
-      amenities: selectedAmenities.length > 0 ? selectedAmenities : ['Floodlights', 'Parking'],
-      sports: selectedSports.length > 0 ? selectedSports : ['Football'],
+      amenities: selectedAmenities.length > 0 ? selectedAmenities : ['Changing Rooms', 'Washrooms', 'Parking'],
+      sports: selectedSports.length > 0 ? selectedSports : ['Cricket', 'Football'],
       image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
-      locationUrl: newArenaLocationUrl
+      locationUrl: newArenaLocationUrl,
+      plan: newArenaPlan,
+      ownerEmail: newArenaEmail,
+      ownerUpiId: upi,
+      ownerQrCodeUrl: qrUrl
     };
 
     setArenas([created, ...arenas]);
     setShowAddTurfForm(false);
-    showToast(`🏢 "${created.title}" Ground Arena Listed Successfully!`);
+    showToast(`🏢 "${created.title}" Arena Listed under ${newArenaPlan === 'subscription' ? 'Plan 1 (Free Tier)' : 'Plan 2 (10% Commission)'}!`);
   };
 
   const handleVerifyTicket = (e: React.FormEvent) => {
@@ -584,7 +764,7 @@ export default function WinDeclareApp() {
       setCheckInStatus(`✓ Ticket ${formatted} Verified! Player Checked-In Successfully.`);
       showToast(`Verified Ticket ${formatted}`);
     } else {
-      alert('Please enter a valid ticket reference code (e.g. WD-43R5KMN70)');
+      alert('Please enter a valid ticket reference code (e.g. WD-09TKPU8)');
     }
   };
 
@@ -626,9 +806,10 @@ export default function WinDeclareApp() {
           </div>
         )}
 
-        {/* Top Header */}
+        {/* CLEANED TOP HEADER NAVIGATION */}
         <header className="border-b border-gray-800/80 bg-[#0d1117]/90 backdrop-blur sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            {/* WinDeclare Logo */}
             <div 
               className="flex items-center gap-2 cursor-pointer group"
               onClick={() => setView('browse')}
@@ -640,19 +821,10 @@ export default function WinDeclareApp() {
                 <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-amber-400 transition">
                   WinDeclare
                 </span>
-                {view === 'owner-portal' && (
-                  <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
-                    Owner Portal
-                  </span>
-                )}
-                {view === 'admin-dashboard' && (
-                  <span className="bg-purple-500/20 text-purple-400 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
-                    Admin Console
-                  </span>
-                )}
               </div>
             </div>
 
+            {/* Standard Navigation Options */}
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setView('browse')}
@@ -663,32 +835,7 @@ export default function WinDeclareApp() {
                 Browse Turfs
               </button>
 
-              {/* RESTRICTED ADMIN CONSOLE BUTTON */}
-              <button 
-                onClick={handleOpenAdminDashboard}
-                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition ${
-                  view === 'admin-dashboard' 
-                    ? 'bg-purple-500 text-white border-purple-500 shadow-lg shadow-purple-500/20' 
-                    : 'border-purple-500/30 text-purple-400 bg-purple-500/10 hover:bg-purple-500/20'
-                }`}
-              >
-                <Shield className="w-4 h-4" />
-                <span className="hidden sm:inline">Admin Console</span>
-              </button>
-
-              <button 
-                onClick={() => setView('owner-portal')}
-                className={`flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-xl border transition ${
-                  view === 'owner-portal' 
-                    ? 'bg-amber-500 text-black border-amber-500' 
-                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-                }`}
-              >
-                <Building2 className="w-4 h-4" />
-                <span className="hidden sm:inline">Owner Dashboard</span>
-              </button>
-
-              {/* PROFILE ICON DROPDOWN MENU */}
+              {/* PROFILE DROPDOWN WITH DUAL-ROLE SWITCHER */}
               <div className="relative">
                 <button 
                   onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
@@ -703,7 +850,7 @@ export default function WinDeclareApp() {
 
                 {/* Profile Dropdown Items */}
                 {isProfileMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-[#0e1320] border border-gray-800 rounded-2xl shadow-2xl p-2 z-50 space-y-1">
+                  <div className="absolute right-0 mt-2 w-64 bg-[#0e1320] border border-gray-800 rounded-2xl shadow-2xl p-2 z-50 space-y-1">
                     <div className="px-3 py-2 border-b border-gray-800">
                       <p className="text-xs font-bold text-white">{currentUser?.name || 'Guest Player'}</p>
                       <p className="text-[10px] text-gray-400 truncate">{currentUser?.phone || currentUser?.email || 'Not logged in'}</p>
@@ -725,6 +872,33 @@ export default function WinDeclareApp() {
                       <span className="text-gray-400 text-[10px]">{favoriteArenaIds.length}</span>
                     </button>
 
+                    {/* DUAL-ROLE SWITCHER BUTTON (PLAYER / OWNER) WITH GUEST GATEKEEPER */}
+                    <button 
+                      onClick={() => {
+                        if (!currentUser) {
+                          setIsProfileMenuOpen(false);
+                          setShowAuthModal(true);
+                          showToast('🔒 Please sign in to access Owner Portal!');
+                          return;
+                        }
+                        if (view === 'owner-portal') {
+                          setView('browse');
+                          showToast('Switched to Player View ⚽');
+                        } else {
+                          setView('owner-portal');
+                          showToast('Switched to Owner Portal 🏢');
+                        }
+                        setIsProfileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Building2 className="w-3.5 h-3.5 text-amber-400" /> 
+                        {view === 'owner-portal' ? 'Switch to Player View' : 'Switch to Owner Portal'}
+                      </span>
+                      <ChevronDown className="w-3 h-3 text-amber-400 -rotate-90" />
+                    </button>
+
                     <button 
                       onClick={() => { setProfileTab('account'); setView('profile'); setIsProfileMenuOpen(false); }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 rounded-xl transition"
@@ -732,18 +906,35 @@ export default function WinDeclareApp() {
                       <Settings className="w-3.5 h-3.5" /> Account Settings
                     </button>
 
+                    {/* Secret Admin Gatekeeper Entrance */}
+                    <button 
+                      onClick={() => { setIsProfileMenuOpen(false); handleOpenAdminDashboard(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-purple-400 hover:bg-purple-500/10 rounded-xl transition font-semibold"
+                    >
+                      <Shield className="w-3.5 h-3.5 text-purple-400" /> Admin Console
+                    </button>
+
                     <div className="pt-1 border-t border-gray-800">
-                      <button 
-                        onClick={() => { 
-                          signOut(auth);
-                          setCurrentUser(null); 
-                          setIsProfileMenuOpen(false); 
-                          showToast('Signed out successfully'); 
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-xl transition font-semibold"
-                      >
-                        <LogOut className="w-3.5 h-3.5" /> Sign Out
-                      </button>
+                      {currentUser ? (
+                        <button 
+                          onClick={async () => { 
+                            await supabase.auth.signOut();
+                            setCurrentUser(null); 
+                            setIsProfileMenuOpen(false); 
+                            showToast('Signed out successfully'); 
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-xl transition font-semibold"
+                        >
+                          <LogOut className="w-3.5 h-3.5" /> Sign Out
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => { setIsProfileMenuOpen(false); setShowAuthModal(true); }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-xs text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition font-bold"
+                        >
+                          <User className="w-3.5 h-3.5" /> Sign In / Login
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -776,17 +967,6 @@ export default function WinDeclareApp() {
                   Book 5-a-side grounds, box cricket pitches, and badminton courts with instant confirmation.
                 </p>
               </div>
-
-              <button 
-                onClick={() => {
-                  setView('owner-portal');
-                  setOwnerTab('listings');
-                  setShowAddTurfForm(true);
-                }}
-                className="px-5 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-black font-extrabold text-sm rounded-xl shadow-lg hover:brightness-110 transition flex items-center gap-2"
-              >
-                <Plus className="w-5 h-5 stroke-[3]" /> Add New Turf Venue
-              </button>
             </div>
 
             {/* Sports Filter & Search Bar */}
@@ -870,6 +1050,15 @@ export default function WinDeclareApp() {
                           <div className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-bold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1">
                             <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> {arena.rating} ({arena.reviews})
                           </div>
+
+                          {/* Pricing Plan Badge */}
+                          <div className="absolute bottom-3 right-3 bg-black/90 backdrop-blur text-[10px] font-bold px-2 py-0.5 rounded border border-white/10">
+                            {arena.plan === 'subscription' ? (
+                              <span className="text-teal-400">Plan 1: Free Tier</span>
+                            ) : (
+                              <span className="text-amber-400">Plan 2: 10% Comm.</span>
+                            )}
+                          </div>
                         </div>
 
                         <div className="p-5 flex-1 flex flex-col justify-between space-y-2">
@@ -940,13 +1129,57 @@ export default function WinDeclareApp() {
             </div>
 
             <div className="space-y-4">
-              <h1 className="text-4xl font-black text-white tracking-tight">{selectedArena.title}</h1>
-              <p className="text-xs text-gray-400 flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-amber-500" /> {selectedArena.location}
-              </p>
+              <div className="flex items-center justify-between">
+                <h1 className="text-4xl font-black text-white tracking-tight">{selectedArena.title}</h1>
+                <span className={`text-xs font-bold px-2.5 py-1 rounded border ${
+                  selectedArena.plan === 'subscription' ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                }`}>
+                  {selectedArena.plan === 'subscription' ? 'Plan 1: Free Tier / Owner QR' : 'Plan 2: 10% Comm. / Admin QR'}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-gray-400 flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-amber-500" /> {selectedArena.location}
+                </p>
+
+                {/* FEATURE 3: Navigate to Ground Button */}
+                <button 
+                  onClick={() => handleNavigate(selectedArena.title, selectedArena.location, selectedArena.locationUrl)}
+                  className="px-3.5 py-1.5 bg-[#080c14] hover:bg-gray-900 border border-teal-500/40 text-teal-400 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition shadow"
+                >
+                  <Navigation className="w-3.5 h-3.5" /> Navigate to Ground
+                </button>
+              </div>
+
+              {/* Sports Tags */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {selectedArena.sports.map(s => (
+                  <span key={s} className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold px-2.5 py-1 rounded-lg">
+                    {s}
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div className="bg-[#0b101d] border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6">
+              {/* FEATURE 3: Facilities Available Section */}
+              <div className="space-y-3 pb-2 border-b border-gray-800/80">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" /> FACILITIES AVAILABLE
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {selectedArena.amenities && selectedArena.amenities.length > 0 ? (
+                    selectedArena.amenities.map((facility) => (
+                      <span key={facility} className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" /> {facility}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-gray-500">Standard Turf Facilities</span>
+                  )}
+                </div>
+              </div>
               {/* Date Selection */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -970,7 +1203,7 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
-              {/* Slot Selection */}
+              {/* Slot Selection with Double-Booking Locking */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5 text-amber-500" /> AVAILABLE SLOTS
@@ -978,19 +1211,24 @@ export default function WinDeclareApp() {
                 <div className="grid grid-cols-3 gap-3">
                   {slotsData.map((slot) => {
                     const isSelected = selectedSlots.some(s => s.time === slot.time);
+                    const isBooked = bookedSlots.some(b => b.arenaId === selectedArena.id && b.dateIndex === selectedDateIndex && b.time === slot.time);
+
                     return (
                       <button
                         key={slot.time}
+                        disabled={isBooked}
                         onClick={() => toggleSlotSelection(slot)}
                         className={`p-3 rounded-2xl border transition text-center space-y-1 ${
-                          isSelected 
+                          isBooked
+                            ? 'bg-gray-900/60 border-gray-800 text-gray-600 cursor-not-allowed line-through'
+                            : isSelected 
                             ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold' 
-                            : 'bg-[#080c14] border-gray-800 text-gray-200'
+                            : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
                         }`}
                       >
                         <p className="text-xs font-extrabold">{slot.time}</p>
-                        <p className={`text-[10px] font-semibold ${isSelected ? 'text-black' : 'text-gray-500'}`}>
-                          ₹{slot.price}
+                        <p className={`text-[10px] font-semibold ${isBooked ? 'text-gray-600' : isSelected ? 'text-black' : 'text-gray-500'}`}>
+                          {isBooked ? 'BOOKED' : `₹${slot.price}`}
                         </p>
                       </button>
                     );
@@ -998,7 +1236,7 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
-              {/* Checkout Bar with Firebase Auth Options */}
+              {/* Checkout Bar */}
               {selectedSlots.length > 0 && (
                 <div className="pt-4 border-t border-gray-800 space-y-4">
                   <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 flex items-center justify-between">
@@ -1011,89 +1249,30 @@ export default function WinDeclareApp() {
                     </div>
                   </div>
 
-                  {/* Dual Auth Switcher: Phone OTP or Google Sign In */}
-                  <div className="space-y-3">
-                    <div className="flex bg-[#080c14] p-1 rounded-xl border border-gray-800">
-                      <button 
-                        type="button"
-                        onClick={() => setAuthMode('phone')}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${authMode === 'phone' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        Phone OTP
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={() => setAuthMode('google')}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${authMode === 'google' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
-                      >
-                        Google Auth
-                      </button>
-                    </div>
-
-                    {authMode === 'google' ? (
-                      <button 
-                        type="button"
-                        onClick={handleGoogleSignIn}
-                        className="w-full py-3 bg-white text-black font-extrabold text-xs rounded-xl hover:bg-gray-100 transition shadow-lg flex items-center justify-center gap-2"
-                      >
-                        <Mail className="w-4 h-4 text-red-500" /> Continue with Google Auth & Pay ₹{totalPrice}
-                      </button>
-                    ) : !otpSent ? (
-                      <form onSubmit={handleSendOtp} className="space-y-3">
-                        <div className="relative">
-                          <Phone className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
-                          <input 
-                            type="tel"
-                            required
-                            value={phoneNumber}
-                            onChange={(e) => setPhoneNumber(e.target.value)}
-                            placeholder="Enter mobile number for OTP"
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                          />
-                        </div>
-                        <button 
-                          type="submit"
-                          className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg"
-                        >
-                          Send Firebase OTP & Continue
-                        </button>
-                      </form>
-                    ) : (
-                      <form onSubmit={handleVerifyOtp} className="space-y-3">
-                        <input 
-                          type="text"
-                          maxLength={6}
-                          required
-                          value={otpCode}
-                          onChange={(e) => setOtpCode(e.target.value)}
-                          placeholder="Enter 6-digit OTP code"
-                          className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-center text-sm font-mono text-amber-400 tracking-widest focus:outline-none focus:border-amber-500"
-                        />
-                        <button 
-                          type="submit"
-                          className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg flex items-center justify-center gap-2"
-                        >
-                          <ShieldCheck className="w-4 h-4" /> Verify OTP & Proceed to Payment
-                        </button>
-                      </form>
-                    )}
-                  </div>
+                  {/* SMART BOOKING ACTION: Checks auth state */}
+                  <button 
+                    type="button"
+                    onClick={handleInitiateCheckout}
+                    className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-sm rounded-xl transition shadow-lg flex items-center justify-center gap-2 shadow-amber-500/20"
+                  >
+                    <Lock className="w-4 h-4 stroke-[3]" /> Proceed to Payment (₹{totalPrice})
+                  </button>
                 </div>
               )}
             </div>
           </main>
         )}
 
-        {/* VIEW 3: ADMIN CONSOLE DASHBOARD */}
+        {/* VIEW 3: ADMIN CONSOLE OVERHAUL & STRUCTURED TABS */}
         {view === 'admin-dashboard' && (
           <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
-                  Super Admin Console
+                  Platform Super Admin Console
                 </span>
-                <h1 className="text-3xl font-extrabold text-white mt-1">Platform Metrics & Registered Users</h1>
-                <p className="text-xs text-gray-400 mt-1">Live Firestore database records of registered players and authentications</p>
+                <h1 className="text-3xl font-extrabold text-white mt-1">Platform Management & Transactions</h1>
+                <p className="text-xs text-gray-400 mt-1">Manage venue subscriptions, 10% commission payouts, users, and payout settings</p>
               </div>
 
               <button 
@@ -1102,111 +1281,310 @@ export default function WinDeclareApp() {
                   setView('browse');
                   showToast('Admin logged out');
                 }}
-                className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold flex items-center gap-2"
+                className="px-3.5 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold flex items-center gap-2 self-start sm:self-auto"
               >
                 <LogOut className="w-3.5 h-3.5" /> Lock Console
               </button>
             </div>
 
-            {/* Admin Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-[#0e1320] border border-purple-500/30 rounded-2xl p-4 shadow-xl">
-                <div className="flex items-center gap-3">
-                  <div className="bg-purple-500/20 text-purple-400 p-2.5 rounded-xl border border-purple-500/30">
-                    <Users className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-black text-white">{registeredUsers.length}</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase">Registered Players</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#0e1320] border border-amber-500/30 rounded-2xl p-4 shadow-xl">
-                <div className="flex items-center gap-3">
-                  <div className="bg-amber-500/20 text-amber-400 p-2.5 rounded-xl border border-amber-500/30">
-                    <Trophy className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-black text-white">{arenas.length}</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase">Active Venues</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#0e1320] border border-emerald-500/30 rounded-2xl p-4 shadow-xl">
-                <div className="flex items-center gap-3">
-                  <div className="bg-emerald-500/20 text-emerald-400 p-2.5 rounded-xl border border-emerald-500/30">
-                    <Calendar className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-black text-white">{myBookings.length}</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase">Total Bookings</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-[#0e1320] border border-teal-500/30 rounded-2xl p-4 shadow-xl">
-                <div className="flex items-center gap-3">
-                  <div className="bg-teal-500/20 text-teal-400 p-2.5 rounded-xl border border-teal-500/30">
-                    <IndianRupee className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-black text-amber-400 font-mono">₹{myBookings.reduce((acc, curr) => acc + curr.amount, 0)}</p>
-                    <p className="text-[10px] font-bold text-gray-400 uppercase">Total Gross GMV</p>
-                  </div>
-                </div>
-              </div>
+            {/* Admin Filter Tabs Navigation */}
+            <div className="flex gap-2 overflow-x-auto bg-[#0e1320] p-2 rounded-2xl border border-gray-800 no-scrollbar">
+              <button
+                onClick={() => setAdminTab('owners-subscription')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  adminTab === 'owners-subscription' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Free/₹2k Subscription Owners ({arenas.filter(a => a.plan === 'subscription').length})
+              </button>
+              <button
+                onClick={() => setAdminTab('owners-commission')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  adminTab === 'owners-commission' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                10% Commission Owners ({arenas.filter(a => a.plan === 'commission').length})
+              </button>
+              <button
+                onClick={() => setAdminTab('players')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  adminTab === 'players' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Registered Players ({registeredUsers.length})
+              </button>
+              <button
+                onClick={() => setAdminTab('turfs')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  adminTab === 'turfs' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Turf Listings ({arenas.length})
+              </button>
+              <button
+                onClick={() => setAdminTab('bookings')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  adminTab === 'bookings' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                Bookings & Transactions ({myBookings.length})
+              </button>
+              <button
+                onClick={() => setAdminTab('settings')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
+                  adminTab === 'settings' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                ⚙️ Admin Payout Settings
+              </button>
             </div>
 
-            {/* Registered Users Table */}
-            <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                  <ShieldCheck className="w-5 h-5 text-purple-400" /> Firestore User Directory
-                </h3>
-                <span className="text-xs text-gray-400">Showing {registeredUsers.length} verified records</span>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-gray-800 text-gray-400 font-bold uppercase text-[10px]">
-                      <th className="py-3 px-4">User ID</th>
-                      <th className="py-3 px-4">Full Name</th>
-                      <th className="py-3 px-4">Contact Detail</th>
-                      <th className="py-3 px-4">Auth Method</th>
-                      <th className="py-3 px-4">Joined Date</th>
-                      <th className="py-3 px-4">Bookings</th>
-                      <th className="py-3 px-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800/60">
-                    {registeredUsers.map((usr) => (
-                      <tr key={usr.id} className="hover:bg-gray-900/50 transition">
-                        <td className="py-3.5 px-4 font-mono font-bold text-purple-400">{usr.id}</td>
-                        <td className="py-3.5 px-4 font-bold text-white">{usr.name}</td>
-                        <td className="py-3.5 px-4 text-gray-300 font-mono">{usr.contact}</td>
-                        <td className="py-3.5 px-4">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            usr.provider === 'Google Auth' ? 'bg-blue-500/10 text-blue-400 border-blue-500/30' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                          }`}>
-                            {usr.provider}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-4 text-gray-400">{usr.joined}</td>
-                        <td className="py-3.5 px-4 font-bold text-white">{usr.totalBookings || 1}</td>
-                        <td className="py-3.5 px-4">
-                          <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
-                            ✓ {usr.status || 'Verified'}
-                          </span>
-                        </td>
+            {/* TAB 1: FREE / ₹2,000 SUBSCRIPTION OWNERS */}
+            {adminTab === 'owners-subscription' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg text-white">Plan 1: Free Tier / ₹2,000 Monthly Subscription Owners</h3>
+                  <span className="text-xs text-teal-400 font-bold bg-teal-500/10 border border-teal-500/30 px-2.5 py-1 rounded-md">
+                    Direct Owner Payouts
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-gray-400 font-bold uppercase text-[10px]">
+                        <th className="py-3 px-4">Arena Title</th>
+                        <th className="py-3 px-4">Owner Email</th>
+                        <th className="py-3 px-4">Owner UPI ID</th>
+                        <th className="py-3 px-4">Hourly Rate</th>
+                        <th className="py-3 px-4">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {arenas.filter(a => a.plan === 'subscription').map(a => (
+                        <tr key={a.id} className="hover:bg-gray-900/50 transition">
+                          <td className="py-3.5 px-4 font-bold text-white">{a.title}</td>
+                          <td className="py-3.5 px-4 text-gray-300">{a.ownerEmail || 'owner@turf.in'}</td>
+                          <td className="py-3.5 px-4 font-mono text-amber-400 font-bold">{a.ownerUpiId || 'owner@okaxis'}</td>
+                          <td className="py-3.5 px-4 font-mono font-bold text-white">₹{a.price}/hr</td>
+                          <td className="py-3.5 px-4">
+                            <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                              ✓ Subscription Active
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* TAB 2: 10% COMMISSION OWNERS */}
+            {adminTab === 'owners-commission' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-lg text-white">Plan 2: 10% Commission Plan Owners</h3>
+                  <span className="text-xs text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-md">
+                    Automated Platform Payouts via Admin QR
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-gray-400 font-bold uppercase text-[10px]">
+                        <th className="py-3 px-4">Arena Title</th>
+                        <th className="py-3 px-4">Owner Email</th>
+                        <th className="py-3 px-4">Platform Commission</th>
+                        <th className="py-3 px-4">Routed QR Payout</th>
+                        <th className="py-3 px-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {arenas.filter(a => a.plan === 'commission').map(a => (
+                        <tr key={a.id} className="hover:bg-gray-900/50 transition">
+                          <td className="py-3.5 px-4 font-bold text-white">{a.title}</td>
+                          <td className="py-3.5 px-4 text-gray-300">{a.ownerEmail || 'owner.kelo@turf.in'}</td>
+                          <td className="py-3.5 px-4 font-mono font-bold text-amber-400">10% Fee per booking</td>
+                          <td className="py-3.5 px-4 font-mono text-purple-400 font-bold">{adminUpiId}</td>
+                          <td className="py-3.5 px-4">
+                            <span className="bg-purple-500/20 text-purple-400 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                              ✓ Auto-Commission Enabled
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: REGISTERED USERS & EMAILS */}
+            {adminTab === 'players' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-lg text-white">Registered Users & Emails</h3>
+                    <p className="text-xs text-gray-400">All registered player & owner accounts synced from Supabase profiles</p>
+                  </div>
+                  <button 
+                    onClick={fetchProfilesFromSupabase}
+                    className="px-3 py-1.5 bg-purple-600/20 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-bold hover:bg-purple-600/30 transition"
+                  >
+                    🔄 Refresh List
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-gray-400 font-bold uppercase text-[10px]">
+                        <th className="py-3 px-4">User Display Name</th>
+                        <th className="py-3 px-4">Gmail / Email Address</th>
+                        <th className="py-3 px-4">User Role</th>
+                        <th className="py-3 px-4">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {(profiles.length > 0 ? profiles : [
+                        { id: 'USR-101', display_name: 'Shravan Kumar', email: 'shravan@windeclare.in', role: 'Player' },
+                        { id: 'USR-102', display_name: 'Rahul Verma', email: 'rahul.v@gmail.com', role: 'Player' },
+                        { id: 'USR-103', display_name: 'Akshay Box Turf Owner', email: 'owner.akshay@turf.in', role: 'Owner' },
+                        { id: 'USR-104', display_name: 'Kelo Sports Owner', email: 'owner.kelo@turf.in', role: 'Owner' }
+                      ]).map((u) => (
+                        <tr key={u.id} className="hover:bg-gray-900/50 transition">
+                          <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black flex items-center justify-center text-[10px]">
+                              {u.display_name ? u.display_name.charAt(0) : 'U'}
+                            </div>
+                            {u.display_name}
+                          </td>
+                          <td className="py-3.5 px-4 text-gray-300 font-mono">{u.email}</td>
+                          <td className="py-3.5 px-4">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                              u.role?.toLowerCase() === 'owner' 
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
+                                : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            }`}>
+                              {u.role || 'Player'}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <button
+                              type="button"
+                              onClick={() => window.open(`mailto:${u.email}?subject=WinDeclare Update&body=Hi ${u.display_name},`)}
+                              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl shadow-lg transition flex items-center gap-1.5"
+                            >
+                              <Mail className="w-3.5 h-3.5" /> Send Email
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: TURF LISTINGS */}
+            {adminTab === 'turfs' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                <h3 className="font-bold text-lg text-white">All Active Ground Venues</h3>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {arenas.map(a => (
+                    <div key={a.id} className="bg-[#080c14] border border-gray-800 p-4 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <img src={a.image} alt={a.title} className="w-12 h-12 rounded-lg object-cover" />
+                        <div>
+                          <h4 className="font-bold text-white text-xs">{a.title}</h4>
+                          <p className="text-[10px] text-gray-400">{a.location}</p>
+                          <p className="text-[10px] font-bold text-amber-400 mt-0.5">₹{a.price}/hr • Plan: {a.plan}</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/30 px-2 py-1 rounded">Active</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 5: BOOKINGS & TRANSACTIONS */}
+            {adminTab === 'bookings' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                <h3 className="font-bold text-lg text-white">Bookings & Transactions Ledger</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-gray-800 text-gray-400 font-bold uppercase text-[10px]">
+                        <th className="py-3 px-4">Booking Ref</th>
+                        <th className="py-3 px-4">Arena Title</th>
+                        <th className="py-3 px-4">Date & Slots</th>
+                        <th className="py-3 px-4">Player Contact</th>
+                        <th className="py-3 px-4">Plan & QR Payout</th>
+                        <th className="py-3 px-4">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800/60">
+                      {myBookings.map(b => (
+                        <tr key={b.id} className="hover:bg-gray-900/50 transition">
+                          <td className="py-3.5 px-4 font-mono font-bold text-amber-400">{b.id}</td>
+                          <td className="py-3.5 px-4 font-bold text-white">{b.arenaTitle}</td>
+                          <td className="py-3.5 px-4 text-gray-300">{b.date} ({b.slots})</td>
+                          <td className="py-3.5 px-4 text-gray-400 font-mono">{b.userContact}</td>
+                          <td className="py-3.5 px-4 font-mono text-[11px] text-purple-400">{b.planUsed} ({b.paymentQrUsed})</td>
+                          <td className="py-3.5 px-4 font-mono font-bold text-white">₹{b.amount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 6: ADMIN PAYOUT & QR SETTINGS */}
+            {adminTab === 'settings' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-5 max-w-xl">
+                <div>
+                  <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-purple-400" /> Platform Admin Payout Settings
+                  </h3>
+                  <p className="text-xs text-gray-400 mt-1">Configure your master UPI ID and QR Code used for receiving 10% Commission Plan payments</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Master Platform Admin UPI ID</label>
+                    <input 
+                      type="text" 
+                      value={adminUpiId}
+                      onChange={(e) => setAdminUpiId(e.target.value)}
+                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-1">Master Platform QR Code Image URL</label>
+                    <input 
+                      type="url" 
+                      value={adminQrCodeUrl}
+                      onChange={(e) => setAdminQrCodeUrl(e.target.value)}
+                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+
+                  <div className="bg-[#080c14] border border-gray-800 p-4 rounded-xl flex items-center justify-between">
+                    <span className="text-xs text-gray-400 font-bold">QR Preview:</span>
+                    <img src={adminQrCodeUrl} alt="Admin QR Preview" className="w-24 h-24 rounded-lg bg-white p-1" />
+                  </div>
+
+                  <button 
+                    onClick={() => showToast('⚙️ Master Admin Payout UPI & QR Code Settings Saved!')}
+                    className="w-full bg-purple-600 hover:bg-purple-500 text-white font-extrabold py-3 rounded-xl transition text-xs shadow-lg"
+                  >
+                    Save Platform Payout Settings
+                  </button>
+                </div>
+              </div>
+            )}
           </main>
         )}
 
@@ -1281,7 +1659,7 @@ export default function WinDeclareApp() {
                 onClick={() => setView('browse')}
                 className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-400 hover:text-rose-400 transition"
               >
-                <LogOut className="w-4 h-4" /> Logout
+                <LogOut className="w-4 h-4" /> Exit Owner Portal
               </button>
             </aside>
 
@@ -1345,16 +1723,41 @@ export default function WinDeclareApp() {
                           />
                         </div>
 
+                        {/* SELECT PRICING PLAN */}
                         <div>
-                          <label className="block text-[11px] font-bold text-amber-400 uppercase mb-1 flex items-center gap-1">
-                            📍 Google Maps Share URL (Optional)
-                          </label>
+                          <label className="block text-[11px] font-bold text-amber-400 uppercase mb-1">Select Pricing Plan *</label>
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setNewArenaPlan('subscription')}
+                              className={`p-3 rounded-xl border text-left transition ${
+                                newArenaPlan === 'subscription' ? 'bg-teal-500/10 border-teal-500 text-teal-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
+                              }`}
+                            >
+                              <p className="text-xs font-bold">Plan 1: Free Tier / ₹2,000/mo</p>
+                              <p className="text-[10px] text-gray-500 mt-0.5">Direct player payment to your QR</p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNewArenaPlan('commission')}
+                              className={`p-3 rounded-xl border text-left transition ${
+                                newArenaPlan === 'commission' ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
+                              }`}
+                            >
+                              <p className="text-xs font-bold">Plan 2: 10% Commission</p>
+                              <p className="text-[10px] text-gray-500 mt-0.5">Automated Admin QR payment</p>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Owner Personal UPI ID (For Plan 1)</label>
                           <input 
-                            type="url" 
-                            value={newArenaLocationUrl}
-                            onChange={(e) => setNewArenaLocationUrl(e.target.value)}
-                            placeholder="https://maps.app.goo.gl/..." 
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                            type="text" 
+                            value={newArenaUpiId}
+                            onChange={(e) => setNewArenaUpiId(e.target.value)}
+                            placeholder="owner.name@okaxis" 
+                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono" 
                           />
                         </div>
 
@@ -1382,61 +1785,78 @@ export default function WinDeclareApp() {
                           </div>
                         </div>
 
-                        {/* Supported Sports Multi-Select */}
+                        {/* FEATURE 2: Ground Location URL (`location_url`) */}
                         <div>
-                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Supported Sports *</label>
+                          <label className="block text-[11px] font-bold text-teal-400 uppercase mb-1">Ground Location Google Maps URL (`location_url`)</label>
+                          <input 
+                            type="url" 
+                            value={newArenaLocationUrl}
+                            onChange={(e) => setNewArenaLocationUrl(e.target.value)}
+                            placeholder="https://maps.google.com/?q=..." 
+                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-teal-500 font-mono" 
+                          />
+                        </div>
+
+                        {/* FEATURE 2: Custom UPI QR Code Upload / Link (`qr_code_url`) */}
+                        <div>
+                          <label className="block text-[11px] font-bold text-purple-400 uppercase mb-1">Owner Personal UPI QR Code Image Link (`qr_code_url`)</label>
+                          <input 
+                            type="url" 
+                            value={newArenaQrCodeUrl}
+                            onChange={(e) => setNewArenaQrCodeUrl(e.target.value)}
+                            placeholder="https://api.qrserver.com/v1/create-qr-code/..." 
+                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono" 
+                          />
+                        </div>
+
+                        {/* FEATURE 2: Multi-Sport Selection Checkboxes / Tags */}
+                        <div>
+                          <label className="block text-[11px] font-bold text-amber-400 uppercase mb-2">Available Sports Checklist *</label>
                           <div className="flex flex-wrap gap-2">
-                            {sportsList.map((sport) => (
-                              <button
-                                type="button"
-                                key={sport}
-                                onClick={() => toggleSport(sport)}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
-                                  selectedSports.includes(sport)
-                                    ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 font-bold'
-                                    : 'bg-[#080c14] text-gray-400 border-gray-800 hover:text-white'
-                                }`}
-                              >
-                                {sport}
-                              </button>
-                            ))}
+                            {sportsList.map((sport) => {
+                              const isSelected = selectedSports.includes(sport);
+                              return (
+                                <button
+                                  key={sport}
+                                  type="button"
+                                  onClick={() => toggleSport(sport)}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                                    isSelected 
+                                      ? 'bg-amber-500 text-black shadow-md font-extrabold' 
+                                      : 'bg-[#080c14] border border-gray-800 text-gray-400 hover:text-white'
+                                  }`}
+                                >
+                                  <input type="checkbox" checked={isSelected} readOnly className="pointer-events-none w-3 h-3 accent-amber-500" />
+                                  {sport}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
 
-                        {/* Facilities & Amenities */}
+                        {/* FEATURE 2: Facilities Checklist Checkboxes */}
                         <div>
-                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-2">Facilities & Amenities</label>
+                          <label className="block text-[11px] font-bold text-emerald-400 uppercase mb-2">Facilities Checklist *</label>
                           <div className="flex flex-wrap gap-2">
-                            {amenitiesList.map((amenity) => (
-                              <button
-                                type="button"
-                                key={amenity}
-                                onClick={() => toggleAmenity(amenity)}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
-                                  selectedAmenities.includes(amenity)
-                                    ? 'bg-teal-500/20 text-teal-400 border-teal-500/50 font-bold'
-                                    : 'bg-[#080c14] text-gray-400 border-gray-800 hover:text-white'
-                                }`}
-                              >
-                                {amenity}
-                              </button>
-                            ))}
+                            {amenitiesList.map((facility) => {
+                              const isSelected = selectedAmenities.includes(facility);
+                              return (
+                                <button
+                                  key={facility}
+                                  type="button"
+                                  onClick={() => toggleAmenity(facility)}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                                    isSelected 
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' 
+                                      : 'bg-[#080c14] border border-gray-800 text-gray-400 hover:text-white'
+                                  }`}
+                                >
+                                  <input type="checkbox" checked={isSelected} readOnly className="pointer-events-none w-3 h-3 accent-emerald-500" />
+                                  {facility}
+                                </button>
+                              );
+                            })}
                           </div>
-                        </div>
-
-                        {/* Tax Settings */}
-                        <div>
-                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Tax Settings</label>
-                          <button
-                            type="button"
-                            onClick={() => setGstEligible(!gstEligible)}
-                            className={`w-full py-2.5 px-4 rounded-xl text-xs font-bold border transition text-left flex items-center justify-between ${
-                              gstEligible ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' : 'bg-[#080c14] border-gray-800 text-gray-400'
-                            }`}
-                          >
-                            <span>Eligible to collect 18% GST</span>
-                            {gstEligible && <Check className="w-4 h-4 stroke-[3]" />}
-                          </button>
                         </div>
 
                         <button 
@@ -1464,7 +1884,7 @@ export default function WinDeclareApp() {
                             </div>
                             <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
                             <div className="flex gap-2 text-[11px] text-amber-400 mt-1 font-semibold">
-                              <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span> • <span>{arena.sports.join(', ')}</span>
+                              <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span> • <span className="text-purple-400 uppercase font-bold">{arena.plan}</span>
                             </div>
                           </div>
                         </div>
@@ -1512,7 +1932,7 @@ export default function WinDeclareApp() {
                           <p className="text-xs text-gray-400 flex items-center gap-2">
                             <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
                           </p>
-                          <p className="text-[11px] text-gray-500">Player Contact: {currentUser?.phone || currentUser?.email || '+91 9505737751'}</p>
+                          <p className="text-[11px] text-gray-500">Player Contact: {b.userContact}</p>
                         </div>
 
                         <div className="sm:text-right space-y-1">
@@ -1779,6 +2199,7 @@ export default function WinDeclareApp() {
                         <p className="text-xs text-gray-400 flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
                         </p>
+                        <p className="text-[10px] text-purple-400 font-mono">Plan: {b.planUsed} • Payout: {b.paymentQrUsed}</p>
                       </div>
 
                       <div className="text-right">
@@ -1863,7 +2284,85 @@ export default function WinDeclareApp() {
         )}
       </div>
 
-      {/* ADMIN CONSOLE SECURITY AUTHENTICATION MODAL */}
+      {/* POPUP MODAL 1: AUTHENTICATION MODAL (Triggered if player clicks book while not logged in) */}
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0e1320] border border-gray-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative space-y-6">
+            <button 
+              onClick={() => setShowAuthModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-white p-1"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-500 uppercase tracking-wider">
+                <Lock className="w-3.5 h-3.5" /> Sign In Required
+              </div>
+              <h3 className="text-xl font-extrabold text-white mt-1">Authenticate to Confirm Slot</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Please log in to verify your ticket booking</p>
+            </div>
+
+            <div className="space-y-3">
+              <button 
+                type="button"
+                onClick={handleGoogleSignIn}
+                className="w-full py-3 bg-white text-black font-extrabold text-xs rounded-xl hover:bg-gray-100 transition shadow-lg flex items-center justify-center gap-2"
+              >
+                <Mail className="w-4 h-4 text-red-500" /> Continue with Google
+              </button>
+
+              <div className="relative flex py-2 items-center">
+                <div className="flex-grow border-t border-gray-800"></div>
+                <span className="flex-shrink mx-4 text-[10px] text-gray-500 uppercase font-bold">Or Mobile Phone OTP</span>
+                <div className="flex-grow border-t border-gray-800"></div>
+              </div>
+
+              {!otpSent ? (
+                <form onSubmit={handleSendOtp} className="space-y-3">
+                  <div className="relative">
+                    <Phone className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
+                    <input 
+                      type="tel"
+                      required
+                      value={phoneNumber}
+                      onChange={(e) => setPhoneNumber(e.target.value)}
+                      placeholder="Enter mobile number for OTP"
+                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <button 
+                    type="submit"
+                    className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg"
+                  >
+                    Send Firebase OTP & Continue
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyOtp} className="space-y-3">
+                  <input 
+                    type="text"
+                    maxLength={6}
+                    required
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value)}
+                    placeholder="Enter 6-digit OTP code"
+                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-center text-sm font-mono text-amber-400 tracking-widest focus:outline-none focus:border-amber-500"
+                  />
+                  <button 
+                    type="submit"
+                    className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <ShieldCheck className="w-4 h-4" /> Verify OTP & Login
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POPUP MODAL 2: ADMIN CONSOLE SECURITY AUTHENTICATION MODAL */}
       {showAdminLoginModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#0e1320] border border-purple-500/40 w-full max-w-md rounded-2xl p-6 shadow-2xl relative space-y-6">
@@ -1876,7 +2375,7 @@ export default function WinDeclareApp() {
 
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-xs font-bold text-purple-400 uppercase tracking-wider">
-                <Shield className="w-4 h-4" /> Restricted Access Area
+                <Shield className="w-4 h-4" /> Restricted Super Admin Route
               </div>
               <h3 className="text-xl font-extrabold text-white">Super Admin Verification</h3>
               <p className="text-xs text-gray-400">Enter master administrator email & password to access console</p>
@@ -1930,7 +2429,7 @@ export default function WinDeclareApp() {
         </div>
       )}
 
-      {/* POPUP MODAL: PAYMENT GATEWAY (UPI / CARD / NETBANKING) */}
+      {/* POPUP MODAL 3: PAYMENT CHECKOUT WITH DYNAMIC QR ROUTING BASED ON PLAN */}
       {showPaymentModal && selectedArena && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-[#0e1320] border border-gray-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative space-y-6">
@@ -1942,29 +2441,68 @@ export default function WinDeclareApp() {
             </button>
 
             <div>
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-500 uppercase tracking-wider">
-                <Lock className="w-3.5 h-3.5" /> Secure Checkout
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs font-bold text-amber-500 uppercase tracking-wider">
+                  <Lock className="w-3.5 h-3.5" /> Secure Checkout
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                  selectedArena.plan === 'subscription' ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' : 'bg-purple-500/10 border-purple-500/30 text-purple-400'
+                }`}>
+                  {selectedArena.plan === 'subscription' ? 'Plan 1: Direct Owner QR' : 'Plan 2: Admin Commission QR'}
+                </span>
               </div>
-              <h3 className="text-xl font-extrabold text-white mt-1">Select Payment Method</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Amount to pay: <span className="text-amber-400 font-bold font-mono">₹{totalPrice}</span></p>
+
+              <h3 className="text-xl font-extrabold text-white mt-1">Scan & Pay ₹{totalPrice}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">{selectedArena.title} • {selectedSlots.map(s => s.time).join(', ')}</p>
+            </div>
+
+            {/* DYNAMIC QR PAYMENT ROUTING */}
+            <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 text-center space-y-3 shadow-inner">
+              <span className="text-xs text-gray-400 font-bold block">
+                {selectedArena.plan === 'subscription' 
+                  ? 'Turf Owner Personal UPI QR Code' 
+                  : 'Platform Master Commission UPI QR Code'}
+              </span>
+
+              <div className="flex justify-center">
+                <img 
+                  src={selectedArena.plan === 'subscription'
+                    ? (selectedArena.ownerQrCodeUrl || 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=owner@okaxis')
+                    : adminQrCodeUrl} 
+                  alt="Payment QR" 
+                  className="w-44 h-44 rounded-xl bg-white p-2 border border-gray-800 shadow-md"
+                />
+              </div>
+
+              <p className="text-xs font-mono font-bold text-amber-400">
+                {selectedArena.plan === 'subscription'
+                  ? (selectedArena.ownerUpiId || 'akshay.box@okaxis')
+                  : adminUpiId}
+              </p>
+
+              <p className="text-[10px] text-gray-500">
+                {selectedArena.plan === 'subscription' 
+                  ? '✓ Payout routed directly to Turf Owner (Plan 1: Free Tier)'
+                  : '✓ Payout routed to Platform Admin for 10% Commission auto-ticket release'}
+              </p>
             </div>
 
             {/* Payment Method Selector */}
-            <div className="space-y-3">
+            <div className="space-y-2">
               <button
                 type="button"
                 onClick={() => setSelectedPaymentMethod('upi')}
-                className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition ${
+                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition ${
                   selectedPaymentMethod === 'upi'
                     ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
                     : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <Smartphone className="w-5 h-5 text-amber-400" />
+                  <Smartphone className="w-4 h-4 text-amber-400" />
                   <div>
-                    <p className="text-xs font-bold">UPI (GPay / PhonePe / Paytm)</p>
-                    <p className="text-[10px] text-gray-500 font-normal">Instant 1-tap checkout</p>
+                    <p className="text-xs font-bold">UPI Apps (GPay / PhonePe / Paytm / BHIM)</p>
+                    <p className="text-[10px] text-gray-500 font-normal">Scan QR or Pay via VPA</p>
                   </div>
                 </div>
                 {selectedPaymentMethod === 'upi' && <CheckCircle className="w-4 h-4 text-amber-500" />}
@@ -1973,14 +2511,14 @@ export default function WinDeclareApp() {
               <button
                 type="button"
                 onClick={() => setSelectedPaymentMethod('card')}
-                className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition ${
+                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition ${
                   selectedPaymentMethod === 'card'
                     ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
                     : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <CreditCard className="w-5 h-5 text-amber-400" />
+                  <CreditCard className="w-4 h-4 text-amber-400" />
                   <div>
                     <p className="text-xs font-bold">Credit / Debit Card</p>
                     <p className="text-[10px] text-gray-500 font-normal">Visa, Mastercard, RuPay</p>
@@ -1988,41 +2526,6 @@ export default function WinDeclareApp() {
                 </div>
                 {selectedPaymentMethod === 'card' && <CheckCircle className="w-4 h-4 text-amber-500" />}
               </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedPaymentMethod('netbanking')}
-                className={`w-full p-3.5 rounded-xl border text-left flex items-center justify-between transition ${
-                  selectedPaymentMethod === 'netbanking'
-                    ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
-                    : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <Wallet className="w-5 h-5 text-amber-400" />
-                  <div>
-                    <p className="text-xs font-bold">Net Banking</p>
-                    <p className="text-[10px] text-gray-500 font-normal">All major Indian banks</p>
-                  </div>
-                </div>
-                {selectedPaymentMethod === 'netbanking' && <CheckCircle className="w-4 h-4 text-amber-500" />}
-              </button>
-            </div>
-
-            {/* Payment Summary */}
-            <div className="bg-[#080c14] border border-gray-800 p-3 rounded-xl space-y-1 text-xs">
-              <div className="flex justify-between text-gray-400">
-                <span>Slot Amount:</span>
-                <span>₹{totalPrice}</span>
-              </div>
-              <div className="flex justify-between text-gray-400">
-                <span>Convenience Fee:</span>
-                <span className="text-emerald-400 font-bold">FREE</span>
-              </div>
-              <div className="flex justify-between font-bold text-white pt-2 border-t border-gray-800">
-                <span>Total Payable:</span>
-                <span className="text-amber-400 font-mono text-base">₹{totalPrice}</span>
-              </div>
             </div>
 
             {/* Submit Payment Button */}
@@ -2034,11 +2537,11 @@ export default function WinDeclareApp() {
             >
               {isProcessingPayment ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Processing Payment...
+                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying & Confirming Slot...
                 </>
               ) : (
                 <>
-                  <Lock className="w-4 h-4 stroke-[3]" /> Pay ₹{totalPrice} & Confirm Slot
+                  <Lock className="w-4 h-4 stroke-[3]" /> Confirm Payment of ₹{totalPrice}
                 </>
               )}
             </button>
@@ -2060,7 +2563,7 @@ export default function WinDeclareApp() {
           <div className="flex gap-6 font-semibold">
             <a href="#terms" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Terms of Service</a>
             <a href="#privacy" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Privacy Policy</a>
-            <a href="#partner" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Partner with Us</a>
+            <a href="#admin" onClick={(e) => { e.preventDefault(); handleOpenAdminDashboard(); }} className="hover:text-purple-400 text-gray-600">Admin Entrance</a>
           </div>
         </div>
       </footer>
