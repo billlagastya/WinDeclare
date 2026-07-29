@@ -520,10 +520,11 @@ export default function WinDeclareApp() {
   // SUPABASE AUTH GOOGLE SIGN-IN
   const handleGoogleSignIn = async () => {
     try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'http://localhost:3000'
+          redirectTo: `${origin}`
         }
       });
       if (error) throw error;
@@ -731,7 +732,13 @@ export default function WinDeclareApp() {
     }
 
     const upi = newArenaUpiId.trim() || 'owner@okaxis';
-    const qrUrl = newArenaQrCodeUrl.trim() || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${upi}`;
+    const inputQr = newArenaQrCodeUrl.trim();
+    let qrUrl = inputQr;
+    if (!qrUrl) {
+      qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${upi}`;
+    } else if (!qrUrl.startsWith('http://') && !qrUrl.startsWith('https://')) {
+      qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${encodeURIComponent(qrUrl)}`;
+    }
 
     const created: Arena = {
       id: Date.now(),
@@ -1799,12 +1806,12 @@ export default function WinDeclareApp() {
 
                         {/* FEATURE 2: Custom UPI QR Code Upload / Link (`qr_code_url`) */}
                         <div>
-                          <label className="block text-[11px] font-bold text-purple-400 uppercase mb-1">Owner Personal UPI QR Code Image Link (`qr_code_url`)</label>
+                          <label className="block text-[11px] font-bold text-purple-400 uppercase mb-1">Owner Personal UPI QR Code Image Link ('QR_CODE_URL')</label>
                           <input 
-                            type="url" 
+                            type="text" 
                             value={newArenaQrCodeUrl}
                             onChange={(e) => setNewArenaQrCodeUrl(e.target.value)}
-                            placeholder="https://api.qrserver.com/v1/create-qr-code/..." 
+                            placeholder="Enter UPI ID (e.g. name@upi) or QR Image Link" 
                             className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono" 
                           />
                         </div>
