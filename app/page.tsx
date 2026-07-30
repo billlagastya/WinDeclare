@@ -13,22 +13,27 @@ import {
 import { supabase } from '@/lib/supabaseClient';
 
 interface Arena {
-  id: number;
+  id: number | string;
   title: string;
   location: string;
   lat: number;
   lng: number;
   price: number;
+  price_per_hour?: number;
+  pricing_rules?: any;
   rating: number;
   reviews: number;
   amenities: string[];
   sports: string[];
   image: string;
   locationUrl?: string;
-  plan: 'subscription' | 'commission';
+  plan?: 'subscription' | 'commission';
   ownerUpiId?: string;
   ownerQrCodeUrl?: string;
   ownerEmail?: string;
+  upiId?: string;
+  whatsappNumber?: string;
+  status?: string;
 }
 
 interface Booking {
@@ -106,7 +111,8 @@ export default function WinDeclareApp() {
   const [adminEmailInput, setAdminEmailInput] = useState<string>('');
   const [adminPasswordInput, setAdminPasswordInput] = useState<string>('');
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
-  const [adminTab, setAdminTab] = useState<'owners-subscription' | 'owners-commission' | 'players' | 'turfs' | 'bookings' | 'settings'>('owners-subscription');
+  const [adminTab, setAdminTab] = useState<'pending-turfs' | 'owners-subscription' | 'owners-commission' | 'players' | 'turfs' | 'bookings' | 'settings'>('pending-turfs');
+  const [pendingGrounds, setPendingGrounds] = useState<Arena[]>([]);
   
   // Platform Admin Payout Settings
   const [adminUpiId, setAdminUpiId] = useState<string>('windeclare.admin@okaxis');
@@ -131,6 +137,7 @@ export default function WinDeclareApp() {
   const [checkInStatus, setCheckInStatus] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string>('Mon');
   const [slotPrices, setSlotPrices] = useState<Record<string, Record<string, number>>>({});
+  const [editingBasePrice, setEditingBasePrice] = useState<number | null>(null);
 
   // Form selections for new venue
   const [newArenaName, setNewArenaName] = useState<string>('');
@@ -141,9 +148,11 @@ export default function WinDeclareApp() {
   const [newArenaQrCodeUrl, setNewArenaQrCodeUrl] = useState<string>('');
   const [newArenaPlan, setNewArenaPlan] = useState<'subscription' | 'commission'>('subscription');
   const [newArenaUpiId, setNewArenaUpiId] = useState<string>('');
+  const [newArenaWhatsappNumber, setNewArenaWhatsappNumber] = useState<string>('');
   const [selectedSports, setSelectedSports] = useState<string[]>(['Cricket', 'Football']);
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['Changing Rooms', 'Washrooms', 'Parking']);
   const [gstEligible, setGstEligible] = useState<boolean>(true);
+  const [isUploadingQr, setIsUploadingQr] = useState<boolean>(false);
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -171,7 +180,8 @@ export default function WinDeclareApp() {
       plan: 'subscription',
       ownerEmail: 'owner.akshay@turf.in',
       ownerUpiId: 'akshay.box@okaxis',
-      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=akshay.box@okaxis'
+      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=akshay.box@okaxis',
+      status: 'approved'
     },
     {
       id: 2,
@@ -189,7 +199,8 @@ export default function WinDeclareApp() {
       plan: 'commission',
       ownerEmail: 'owner.kelo@turf.in',
       ownerUpiId: 'kelobharat@upi',
-      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=kelobharat@upi'
+      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=kelobharat@upi',
+      status: 'approved'
     },
     {
       id: 3,
@@ -207,7 +218,8 @@ export default function WinDeclareApp() {
       plan: 'subscription',
       ownerEmail: 'owner.smash@turf.in',
       ownerUpiId: 'smashserve@okicici',
-      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=smashserve@okicici'
+      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=smashserve@okicici',
+      status: 'approved'
     }
   ]);
 
@@ -409,6 +421,147 @@ export default function WinDeclareApp() {
     fetchBookingsFromSupabase();
   }, []);
 
+  // Fetch Pending Grounds from Supabase Database for Admin Verification
+  const fetchPendingGroundsFromSupabase = async () => {
+    try {
+      const { data, error } = await supabase.from('grounds').select('*').eq('status', 'pending');
+      if (!error && data) {
+        const mappedPending: Arena[] = data.map((item: any, index: number) => ({
+          id: item.id || item.ground_id || `pending-${Date.now()}-${index}`,
+          title: item.name || item.title || 'Pending Turf Arena',
+          location: item.location || 'Hyderabad',
+          lat: item.lat || 17.4399,
+          lng: item.lng || 78.5082,
+          price: item.price_per_hour || item.price || 1000,
+          rating: item.rating || 5.0,
+          reviews: item.reviews || 1,
+          amenities: item.facilities || item.amenities || ['Changing Rooms', 'Washrooms', 'Parking'],
+          sports: item.sports || ['Cricket', 'Football'],
+          image: item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
+          locationUrl: item.location_url || item.locationUrl || '',
+          plan: item.plan || 'subscription',
+          ownerEmail: item.owner_email || item.ownerEmail || 'owner@turf.in',
+          ownerUpiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
+          ownerQrCodeUrl: item.qr_code_url || item.ownerQrCodeUrl || '',
+          upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
+          whatsappNumber: item.whatsapp_number || item.whatsappNumber || '',
+          status: 'pending'
+        }));
+        setPendingGrounds(mappedPending);
+      }
+    } catch (e) {
+      console.error("Error fetching pending grounds from Supabase:", e);
+    }
+  };
+
+  // Fetch Grounds directly from Supabase Database on page load
+  const fetchGroundsFromSupabase = async () => {
+    try {
+      let { data, error } = await supabase.from('grounds').select('*');
+      if (error || !data || data.length === 0) {
+        const { data: arenaData, error: arenaError } = await supabase.from('arenas').select('*');
+        if (!arenaError && arenaData && arenaData.length > 0) {
+          data = arenaData;
+          error = null;
+        }
+      }
+
+      if (!error && data && data.length > 0) {
+        const mappedGrounds: Arena[] = data.map((item: any, index: number) => ({
+          id: item.id || item.ground_id || (Date.now() + index),
+          title: item.name || item.title || 'Ground Arena',
+          location: item.location || 'Hyderabad',
+          lat: item.lat || 17.4399,
+          lng: item.lng || 78.5082,
+          price: Number(item.price_per_hour || item.price || 1000),
+          price_per_hour: Number(item.price_per_hour || item.price || 1000),
+          pricing_rules: item.pricing_rules || null,
+          rating: item.rating || 5.0,
+          reviews: item.reviews || 1,
+          amenities: item.facilities || item.amenities || ['Changing Rooms', 'Washrooms', 'Parking'],
+          sports: item.sports || ['Cricket', 'Football'],
+          image: item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
+          locationUrl: item.location_url || item.locationUrl || '',
+          plan: item.plan || 'subscription',
+          ownerEmail: item.owner_email || item.ownerEmail || 'owner@turf.in',
+          ownerUpiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
+          ownerQrCodeUrl: item.qr_code_url || item.ownerQrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${item.upi_id || item.owner_upi_id || 'owner@okaxis'}`,
+          upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
+          whatsappNumber: item.whatsapp_number || item.whatsappNumber || '',
+          status: item.status || 'approved'
+        }));
+
+        setArenas(mappedGrounds);
+
+        // Re-hydrate slotPrices state on refresh if ground.pricing_rules exists
+        const firstWithRules = mappedGrounds.find(g => g.pricing_rules);
+        if (firstWithRules) {
+          let rules = firstWithRules.pricing_rules;
+          if (typeof rules === 'string') {
+            try { rules = JSON.parse(rules); } catch (e) { rules = null; }
+          }
+          if (rules && (rules.slotPrices || rules.slot_prices)) {
+            setSlotPrices(rules.slotPrices || rules.slot_prices);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching grounds from Supabase:", e);
+    }
+  };
+
+  // Admin Actions: Approve or Reject Ground
+  const handleApproveGround = async (groundId: number | string) => {
+    try {
+      const { error } = await supabase
+        .from('grounds')
+        .update({ status: 'approved' })
+        .eq('id', groundId);
+      
+      if (error) {
+        console.warn("Supabase update error (retrying with ground_id):", error);
+        await supabase.from('grounds').update({ status: 'approved' }).eq('ground_id', groundId);
+      }
+    } catch (e) {
+      console.error("Error approving ground in Supabase:", e);
+    }
+
+    setArenas(prev => prev.map(a => String(a.id) === String(groundId) ? { ...a, status: 'approved' } : a));
+    setPendingGrounds(prev => prev.filter(a => String(a.id) !== String(groundId)));
+
+    await fetchGroundsFromSupabase();
+    await fetchPendingGroundsFromSupabase();
+    showToast('✓ Ground approved! Moved to public feed.');
+  };
+
+  const handleRejectGround = async (groundId: number | string) => {
+    try {
+      const { error } = await supabase
+        .from('grounds')
+        .update({ status: 'rejected' })
+        .eq('id', groundId);
+
+      if (error) {
+        console.warn("Supabase reject warning (retrying delete):", error);
+        await supabase.from('grounds').delete().eq('id', groundId);
+      }
+    } catch (e) {
+      console.error("Error rejecting ground in Supabase:", e);
+    }
+
+    setArenas(prev => prev.filter(a => String(a.id) !== String(groundId)));
+    setPendingGrounds(prev => prev.filter(a => String(a.id) !== String(groundId)));
+
+    await fetchGroundsFromSupabase();
+    await fetchPendingGroundsFromSupabase();
+    showToast('✕ Ground rejected.');
+  };
+
+  useEffect(() => {
+    fetchGroundsFromSupabase();
+    fetchPendingGroundsFromSupabase();
+  }, [view, adminTab]);
+
   // Geolocation Request on Mount
   useEffect(() => {
     if (navigator.geolocation) {
@@ -453,32 +606,50 @@ export default function WinDeclareApp() {
     { day: 'MON', date: '3' }
   ];
 
-  const slotsData = [
-    { time: '12:00 AM', price: 323 },
-    { time: '1:00 AM', price: 323 },
-    { time: '2:00 AM', price: 323 },
-    { time: '3:00 AM', price: 323 },
-    { time: '4:00 AM', price: 323 },
-    { time: '5:00 AM', price: 323 },
-    { time: '6:00 AM', price: 323 },
-    { time: '7:00 AM', price: 323 },
-    { time: '8:00 AM', price: 323 },
-    { time: '9:00 AM', price: 323 },
-    { time: '10:00 AM', price: 323 },
-    { time: '11:00 AM', price: 323 },
-    { time: '12:00 PM', price: 323 },
-    { time: '1:00 PM', price: 323 },
-    { time: '2:00 PM', price: 323 },
-    { time: '3:00 PM', price: 323 },
-    { time: '4:00 PM', price: 323 },
-    { time: '5:00 PM', price: 404 },
-    { time: '6:00 PM', price: 404 },
-    { time: '7:00 PM', price: 404 },
-    { time: '8:00 PM', price: 404 },
-    { time: '9:00 PM', price: 404 },
-    { time: '10:00 PM', price: 323 },
-    { time: '11:00 PM', price: 323 }
-  ];
+  // Dynamic Time Slot Pricing Generator (renders prices using ground.price_per_hour or specific pricing_rules[day][slotTime])
+  const getSlotsDataForArena = (ground: Arena | null, dateIndex: number = 0) => {
+    const slotBasePrice = Number(ground?.price_per_hour || (ground as any)?.price_per_hour || ground?.price || 1200);
+    const activeDate = datesList[dateIndex];
+    const activeDateDay = activeDate ? activeDate.day : selectedDay;
+
+    let pricingRules = ground?.pricing_rules || (ground as any)?.pricing_rules;
+    if (typeof pricingRules === 'string') {
+      try {
+        pricingRules = JSON.parse(pricingRules);
+      } catch (e) {
+        pricingRules = {};
+      }
+    }
+
+    const savedSlotPrices = pricingRules?.slotPrices || pricingRules?.slot_prices || pricingRules || {};
+    const dayKey = Object.keys(savedSlotPrices).find(k => k.toLowerCase() === activeDateDay.toLowerCase()) || activeDateDay;
+    const savedDayPrices = savedSlotPrices[dayKey] || savedSlotPrices[activeDateDay] || {};
+
+    const times = [
+      '12:00 AM', '1:00 AM', '2:00 AM', '3:00 AM', '4:00 AM', '5:00 AM',
+      '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
+      '12:00 PM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM',
+      '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM', '11:00 PM'
+    ];
+
+    return times.map(time => {
+      // 1. Saved slot override in pricing_rules[day][time]
+      if (savedDayPrices && savedDayPrices[time] !== undefined && savedDayPrices[time] !== '') {
+        return { time, price: Number(savedDayPrices[time]) };
+      }
+      if (pricingRules && pricingRules[time] !== undefined && typeof pricingRules[time] === 'number') {
+        return { time, price: Number(pricingRules[time]) };
+      }
+
+      // 2. React state slot price override for active session
+      if (slotPrices[activeDateDay]?.[time] !== undefined && slotPrices[activeDateDay][time] !== '') {
+        return { time, price: Number(slotPrices[activeDateDay][time]) };
+      }
+
+      // 3. Baseline price_per_hour default
+      return { time, price: slotBasePrice };
+    });
+  };
 
   const toggleFavorite = (arenaId: number, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -718,6 +889,34 @@ export default function WinDeclareApp() {
     }
   };
 
+  // QR Code Image File Upload Handler (Upload to Supabase Storage 'qr-codes' bucket)
+  const handleQrFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingQr(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}.${fileExt}`;
+      const { data, error } = await supabase.storage.from('qr-codes').upload(fileName, file);
+
+      if (error) {
+        console.error('Supabase Storage QR upload error:', error);
+      }
+
+      // Retrieve permanent public URL
+      const { data: publicUrlData } = supabase.storage.from('qr-codes').getPublicUrl(fileName);
+      const qrCodeUrl = publicUrlData.publicUrl;
+
+      setNewArenaQrCodeUrl(qrCodeUrl);
+      showToast('✓ QR Code Image uploaded to Storage!');
+    } catch (err: any) {
+      console.error('QR Upload Exception:', err);
+    } finally {
+      setIsUploadingQr(false);
+    }
+  };
+
   const handleCreateVenue = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) {
@@ -740,6 +939,17 @@ export default function WinDeclareApp() {
       qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${encodeURIComponent(qrUrl)}`;
     }
 
+    const newTurf = {
+      name: newArenaName,
+      price: newArenaPrice,
+      locationUrl: newArenaLocationUrl,
+      qrCodeUrl: qrUrl,
+      upiId: upi,
+      whatsappNumber: newArenaWhatsappNumber,
+      sports: selectedSports,
+      facilities: selectedAmenities
+    };
+
     const created: Arena = {
       id: Date.now(),
       title: newArenaName,
@@ -756,12 +966,48 @@ export default function WinDeclareApp() {
       plan: newArenaPlan,
       ownerEmail: newArenaEmail,
       ownerUpiId: upi,
-      ownerQrCodeUrl: qrUrl
+      ownerQrCodeUrl: qrUrl,
+      upiId: upi,
+      whatsappNumber: newArenaWhatsappNumber,
+      status: 'pending'
     };
 
-    setArenas([created, ...arenas]);
-    setShowAddTurfForm(false);
-    showToast(`🏢 "${created.title}" Arena Listed under ${newArenaPlan === 'subscription' ? 'Plan 1 (Free Tier)' : 'Plan 2 (10% Commission)'}!`);
+    // Save/Insert Ground directly into Supabase database with status: 'pending'
+    (async () => {
+      try {
+        const qrCodeUrl = newTurf.qrCodeUrl || '';
+        const payload = {
+          name: newTurf.name || 'New Turf',
+          price_per_hour: Number(newTurf.price || 0) || 1000,
+          location_url: newTurf.locationUrl || '',
+          qr_code_url: qrCodeUrl || '',
+          upi_id: newTurf.upiId || '',
+          whatsapp_number: newTurf.whatsappNumber || '',
+          sports: Array.isArray(newTurf.sports) ? newTurf.sports : [],
+          facilities: Array.isArray(newTurf.facilities) ? newTurf.facilities : [],
+          status: 'pending'
+        };
+
+        const { data, error } = await supabase.from('grounds').insert([payload]).select();
+
+        if (error) {
+          console.error('Supabase grounds save error message:', error.message, error.details);
+          alert('Failed to save turf: ' + (error.message || JSON.stringify(error)));
+          return;
+        }
+
+        await fetchGroundsFromSupabase();
+        await fetchPendingGroundsFromSupabase();
+
+        setArenas(prev => [created, ...prev]);
+        setShowAddTurfForm(false);
+        alert('Turf submitted successfully! It is pending admin verification.');
+        showToast('Turf submitted successfully! It is pending admin verification.');
+      } catch (err: any) {
+        console.error('Error saving ground to Supabase:', err);
+        alert('Failed to save turf: ' + (err.message || JSON.stringify(err)));
+      }
+    })();
   };
 
   const handleVerifyTicket = (e: React.FormEvent) => {
@@ -786,17 +1032,61 @@ export default function WinDeclareApp() {
   };
 
   const handleApplySurge = (percentage: number) => {
-    const basePrice = 323;
-    const newRate = Math.round(basePrice * (1 + percentage / 100));
+    const groundToUse = selectedArena || arenas[0];
+    const slotBasePrice = Number(groundToUse?.price_per_hour || groundToUse?.price || 1200);
+    const newRate = Math.round(slotBasePrice * (1 + percentage / 100));
+    const currentSlots = getSlotsDataForArena(groundToUse, selectedDateIndex);
+
     const updatedDayPrices: Record<string, number> = {};
-    slotsData.forEach(s => {
+    currentSlots.forEach(s => {
       updatedDayPrices[s.time] = newRate;
     });
+
     setSlotPrices(prev => ({
       ...prev,
       [selectedDay]: updatedDayPrices
     }));
-    showToast(`Applied ${percentage > 0 ? `+${percentage}% surge (₹${newRate})` : `reset base rate (₹323)`} for ${selectedDay}`);
+    showToast(`Applied ${percentage > 0 ? `+${percentage}% surge (₹${newRate})` : `reset base rate (₹${slotBasePrice})`} for ${selectedDay}`);
+  };
+
+  const handleSaveOwnerPricing = async (groundId: number | string, updatedPrice: number) => {
+    const slotPricesObj = {
+      slotPrices: slotPrices,
+      basePrice: Number(updatedPrice),
+      peakMultiplier: 1.25,
+      weekendMultiplier: 1.15,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      const { error } = await supabase
+        .from('grounds')
+        .update({ 
+          price_per_hour: Number(updatedPrice),
+          pricing_rules: slotPricesObj
+        })
+        .eq('id', groundId);
+
+      if (error) {
+        console.error('Failed to save pricing:', error);
+        alert('Failed to save: ' + (error.message || JSON.stringify(error)));
+        return;
+      } else {
+        alert('Prices saved successfully!');
+      }
+    } catch (e: any) {
+      console.error('Failed to save pricing:', e);
+      alert('Failed to save: ' + (e.message || JSON.stringify(e)));
+      return;
+    }
+
+    setArenas(prev => prev.map(a => String(a.id) === String(groundId) ? { ...a, price: Number(updatedPrice), price_per_hour: Number(updatedPrice), pricing_rules: slotPricesObj } : a));
+    if (selectedArena && String(selectedArena.id) === String(groundId)) {
+      setSelectedArena(prev => prev ? { ...prev, price: Number(updatedPrice), price_per_hour: Number(updatedPrice), pricing_rules: slotPricesObj } : null);
+    }
+
+    await fetchGroundsFromSupabase();
+    showToast(`✓ Pricing updated to ₹${updatedPrice}/hr! Saved to Supabase database.`);
   };
 
   return (
@@ -913,13 +1203,15 @@ export default function WinDeclareApp() {
                       <Settings className="w-3.5 h-3.5" /> Account Settings
                     </button>
 
-                    {/* Secret Admin Gatekeeper Entrance */}
-                    <button 
-                      onClick={() => { setIsProfileMenuOpen(false); handleOpenAdminDashboard(); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-purple-400 hover:bg-purple-500/10 rounded-xl transition font-semibold"
-                    >
-                      <Shield className="w-3.5 h-3.5 text-purple-400" /> Admin Console
-                    </button>
+                    {/* Secret Admin Gatekeeper Entrance - Visible ONLY to kondrashravankumar@gmail.com */}
+                    {currentUser?.email === 'kondrashravankumar@gmail.com' && (
+                      <button 
+                        onClick={() => { setIsProfileMenuOpen(false); handleOpenAdminDashboard(); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-purple-400 hover:bg-purple-500/10 rounded-xl transition font-semibold"
+                      >
+                        <Shield className="w-3.5 h-3.5 text-purple-400" /> Admin Console
+                      </button>
+                    )}
 
                     <div className="pt-1 border-t border-gray-800">
                       {currentUser ? (
@@ -1026,7 +1318,7 @@ export default function WinDeclareApp() {
             {/* Arenas Grid */}
             <div className="grid md:grid-cols-3 gap-6">
               {arenas
-                .filter(a => (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
+                .filter(a => (a.status === 'approved') && (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
                 .map((arena) => {
                   const distance = userLocation 
                     ? calculateDistance(userLocation.lat, userLocation.lng, arena.lat, arena.lng)
@@ -1058,14 +1350,6 @@ export default function WinDeclareApp() {
                             <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> {arena.rating} ({arena.reviews})
                           </div>
 
-                          {/* Pricing Plan Badge */}
-                          <div className="absolute bottom-3 right-3 bg-black/90 backdrop-blur text-[10px] font-bold px-2 py-0.5 rounded border border-white/10">
-                            {arena.plan === 'subscription' ? (
-                              <span className="text-teal-400">Plan 1: Free Tier</span>
-                            ) : (
-                              <span className="text-amber-400">Plan 2: 10% Comm.</span>
-                            )}
-                          </div>
                         </div>
 
                         <div className="p-5 flex-1 flex flex-col justify-between space-y-2">
@@ -1138,11 +1422,6 @@ export default function WinDeclareApp() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h1 className="text-4xl font-black text-white tracking-tight">{selectedArena.title}</h1>
-                <span className={`text-xs font-bold px-2.5 py-1 rounded border ${
-                  selectedArena.plan === 'subscription' ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                }`}>
-                  {selectedArena.plan === 'subscription' ? 'Plan 1: Free Tier / Owner QR' : 'Plan 2: 10% Comm. / Admin QR'}
-                </span>
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1216,7 +1495,7 @@ export default function WinDeclareApp() {
                   <Clock className="w-3.5 h-3.5 text-amber-500" /> AVAILABLE SLOTS
                 </span>
                 <div className="grid grid-cols-3 gap-3">
-                  {slotsData.map((slot) => {
+                  {getSlotsDataForArena(selectedArena, selectedDateIndex).map((slot) => {
                     const isSelected = selectedSlots.some(s => s.time === slot.time);
                     const isBooked = bookedSlots.some(b => b.arenaId === selectedArena.id && b.dateIndex === selectedDateIndex && b.time === slot.time);
 
@@ -1297,6 +1576,14 @@ export default function WinDeclareApp() {
             {/* Admin Filter Tabs Navigation */}
             <div className="flex gap-2 overflow-x-auto bg-[#0e1320] p-2 rounded-2xl border border-gray-800 no-scrollbar">
               <button
+                onClick={() => setAdminTab('pending-turfs')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-1.5 ${
+                  adminTab === 'pending-turfs' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" /> Pending Verification ({Array.from(new Map([...pendingGrounds, ...arenas.filter(a => a.status === 'pending')].map(i => [String(i.id), i])).values()).length})
+              </button>
+              <button
                 onClick={() => setAdminTab('owners-subscription')}
                 className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition ${
                   adminTab === 'owners-subscription' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
@@ -1345,6 +1632,107 @@ export default function WinDeclareApp() {
                 ⚙️ Admin Payout Settings
               </button>
             </div>
+
+            {/* TAB 0: PENDING TURF VERIFICATIONS */}
+            {adminTab === 'pending-turfs' && (
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-lg text-white flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-amber-400" /> Pending Turf Verifications
+                    </h3>
+                    <p className="text-xs text-gray-400 mt-1">Review newly submitted turfs awaiting administrator approval before publishing to public feed</p>
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      await fetchPendingGroundsFromSupabase();
+                      await fetchGroundsFromSupabase();
+                      showToast('Refreshed pending list');
+                    }}
+                    className="px-3 py-1.5 bg-purple-600/20 text-purple-300 border border-purple-500/30 rounded-xl text-xs font-bold hover:bg-purple-600/30 transition flex items-center gap-1.5"
+                  >
+                    <Clock className="w-3.5 h-3.5" /> Refresh Pending
+                  </button>
+                </div>
+
+                {(() => {
+                  const pendingList = Array.from(new Map([...pendingGrounds, ...arenas.filter(a => a.status === 'pending')].map(i => [String(i.id), i])).values());
+                  if (pendingList.length === 0) {
+                    return (
+                      <div className="text-center py-12 border border-dashed border-gray-800 rounded-2xl bg-[#080c14] space-y-2">
+                        <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto opacity-80" />
+                        <h4 className="font-bold text-white text-base">No Pending Verifications</h4>
+                        <p className="text-xs text-gray-500 max-w-sm mx-auto">All submitted grounds have been reviewed. New submissions will appear here automatically.</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid md:grid-cols-2 gap-6">
+                      {pendingList.map((arena) => (
+                        <div key={arena.id} className="bg-[#080c14] border border-amber-500/30 rounded-2xl p-5 space-y-4 shadow-xl flex flex-col justify-between">
+                          <div className="space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-widest bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                                  Pending Verification
+                                </span>
+                                <h4 className="font-extrabold text-lg text-white mt-1.5">{arena.title}</h4>
+                                <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+                                  <MapPin className="w-3.5 h-3.5 text-amber-500" /> {arena.location}
+                                </p>
+                              </div>
+                              <span className="text-sm font-black text-amber-400 font-mono bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20">
+                                ₹{arena.price}/hr
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-xs bg-[#0e1320] p-3 rounded-xl border border-gray-800">
+                              <div>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase block">Owner Email</span>
+                                <span className="font-mono text-gray-300 text-[11px] truncate block">{arena.ownerEmail || 'N/A'}</span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] font-bold text-gray-500 uppercase block">Payout Plan</span>
+                                <span className="font-bold text-amber-400 text-[11px]">{arena.plan === 'subscription' ? 'Plan 1: Free Tier' : 'Plan 2: 10% Comm.'}</span>
+                              </div>
+                            </div>
+
+                            {arena.sports && arena.sports.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {arena.sports.map(s => (
+                                  <span key={s} className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
+                                    {s}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Action Buttons: Approve & Reject */}
+                          <div className="pt-3 border-t border-gray-800 flex items-center gap-3">
+                            <button 
+                              type="button"
+                              onClick={() => handleApproveGround(arena.id)}
+                              className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold py-2.5 rounded-xl transition text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20"
+                            >
+                              <CheckCircle2 className="w-4 h-4 stroke-[3]" /> Approve
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => handleRejectGround(arena.id)}
+                              className="flex-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 font-extrabold py-2.5 rounded-xl transition text-xs flex items-center justify-center gap-1.5"
+                            >
+                              <X className="w-4 h-4" /> Reject
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* TAB 1: FREE / ₹2,000 SUBSCRIPTION OWNERS */}
             {adminTab === 'owners-subscription' && (
@@ -1758,13 +2146,26 @@ export default function WinDeclareApp() {
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Owner Personal UPI ID (For Plan 1)</label>
+                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Owner Personal UPI ID (`upi_id`) *</label>
                           <input 
                             type="text" 
+                            required
                             value={newArenaUpiId}
                             onChange={(e) => setNewArenaUpiId(e.target.value)}
                             placeholder="owner.name@okaxis" 
                             className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono" 
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-emerald-400 uppercase mb-1">Owner WhatsApp Contact Number (`whatsapp_number`) *</label>
+                          <input 
+                            type="tel" 
+                            required
+                            value={newArenaWhatsappNumber}
+                            onChange={(e) => setNewArenaWhatsappNumber(e.target.value)}
+                            placeholder="+91 9505737751" 
+                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono" 
                           />
                         </div>
 
@@ -1792,7 +2193,7 @@ export default function WinDeclareApp() {
                           </div>
                         </div>
 
-                        {/* FEATURE 2: Ground Location URL (`location_url`) */}
+                        {/* Ground Location Google Maps URL */}
                         <div>
                           <label className="block text-[11px] font-bold text-teal-400 uppercase mb-1">Ground Location Google Maps URL (`location_url`)</label>
                           <input 
@@ -1804,16 +2205,22 @@ export default function WinDeclareApp() {
                           />
                         </div>
 
-                        {/* FEATURE 2: Custom UPI QR Code Upload / Link (`qr_code_url`) */}
-                        <div>
-                          <label className="block text-[11px] font-bold text-purple-400 uppercase mb-1">Owner Personal UPI QR Code Image Link ('QR_CODE_URL')</label>
+                        {/* QR Code Image Direct File Upload (Supabase Storage 'qr-codes' bucket) */}
+                        <div className="space-y-2">
+                          <label className="block text-[11px] font-bold text-purple-400 uppercase">Upload Owner Payment QR Code Image (`file` upload)</label>
                           <input 
-                            type="text" 
-                            value={newArenaQrCodeUrl}
-                            onChange={(e) => setNewArenaQrCodeUrl(e.target.value)}
-                            placeholder="Enter UPI ID (e.g. name@upi) or QR Image Link" 
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500 font-mono" 
+                            type="file" 
+                            accept="image/*"
+                            onChange={handleQrFileUpload}
+                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2 text-xs text-gray-300 focus:outline-none focus:border-purple-500 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-purple-600 file:text-white hover:file:bg-purple-500 cursor-pointer"
                           />
+                          {isUploadingQr && <p className="text-[10px] text-amber-400 font-semibold animate-pulse">Uploading QR Code Image to Supabase Storage ('qr-codes')...</p>}
+                          {newArenaQrCodeUrl && (
+                            <div className="flex items-center gap-3 bg-[#080c14] border border-gray-800 p-2 rounded-xl">
+                              <img src={newArenaQrCodeUrl} alt="Uploaded QR" className="w-12 h-12 object-cover rounded-lg bg-white p-1" />
+                              <span className="text-[10px] text-emerald-400 font-bold truncate">✓ Public Storage URL Created</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* FEATURE 2: Multi-Sport Selection Checkboxes / Tags */}
@@ -1955,122 +2362,108 @@ export default function WinDeclareApp() {
               )}
 
               {/* TAB 3: DYNAMIC TIME & DAY BASED SLOT PRICING */}
-              {ownerTab === 'pricing' && (
-                <div className="space-y-6">
-                  <div>
-                    <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                      Slot Pricing Manager
-                    </span>
-                    <h2 className="text-3xl font-extrabold text-white mt-1">Time-based pricing</h2>
-                    <p className="text-xs text-gray-400 mt-1">
-                      Set custom hourly rates per slot for each day of the week. Apply weekend hikes or peak-hour surges dynamically.
-                    </p>
-                  </div>
+              {ownerTab === 'pricing' && (() => {
+                const ownerGround = selectedArena || arenas[0];
+                const baseGroundPrice = Number(editingBasePrice !== null ? editingBasePrice : (ownerGround?.price_per_hour || ownerGround?.price || 1200));
 
-                  {/* Day Selector & Bulk Controls */}
-                  <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-6 shadow-2xl">
-                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
-                      <div>
-                        <h3 className="font-bold text-white text-base">Akshay Box Turf</h3>
-                        <p className="text-xs text-gray-400">Base price: <span className="text-amber-400 font-bold">₹323/hr</span></p>
-                      </div>
-
-                      {/* Day of the Week Selector */}
-                      <div className="flex gap-1 overflow-x-auto bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
-                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-                          <button
-                            key={day}
-                            type="button"
-                            onClick={() => setSelectedDay(day)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                              selectedDay === day
-                                ? 'bg-amber-500 text-black shadow-md font-black'
-                                : 'text-gray-400 hover:text-white'
-                            }`}
-                          >
-                            {day}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Quick Surge Modifiers */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 bg-[#080c14] border border-gray-800/80 p-3 rounded-xl">
-                      <span className="text-xs font-bold text-gray-400 uppercase">
-                        Quick Preset for {selectedDay}:
+                return (
+                  <div className="space-y-6">
+                    <div>
+                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        Slot Pricing Manager
                       </span>
-                      <div className="flex gap-2">
-                        <button 
-                          type="button"
-                          onClick={() => handleApplySurge(0)}
-                          className="px-2.5 py-1 bg-gray-900 border border-gray-800 text-gray-300 rounded-lg text-xs font-semibold hover:border-gray-700"
-                        >
-                          Reset (₹323)
-                        </button>
-                        <button 
-                          type="button"
-                          onClick={() => handleApplySurge(15)}
-                          className="px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-lg text-xs font-semibold hover:bg-amber-500/20"
-                        >
-                          +15% Peak
-                        </button>
-                        <button 
-                          type="button"
-                          onClick={() => handleApplySurge(25)}
-                          className="px-2.5 py-1 bg-orange-500/20 border border-orange-500/40 text-orange-400 rounded-lg text-xs font-semibold hover:bg-orange-500/30"
-                        >
-                          +25% Weekend Hike
-                        </button>
-                      </div>
+                      <h2 className="text-3xl font-extrabold text-white mt-1">Time-based pricing</h2>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Set custom hourly rates per slot for each day of the week or update baseline turf hourly price.
+                      </p>
                     </div>
 
-                    {/* 24-Hour Price Edit Cards Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-2 no-scrollbar">
-                      {slotsData.map((slot) => (
-                        <div 
-                          key={slot.time} 
-                          className="bg-[#080c14] border border-gray-800/80 p-3 rounded-xl space-y-2 hover:border-amber-500/40 transition"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-extrabold text-white">{slot.time}</span>
-                            {(selectedDay === 'Sat' || selectedDay === 'Sun') && (
-                              <span className="text-[9px] font-bold bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded">
-                                Hike
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="space-y-1">
-                            <div className="relative">
-                              <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₹</span>
-                              <input 
-                                type="number" 
-                                value={slotPrices[selectedDay]?.[slot.time] ?? slot.price}
-                                onChange={(e) => handlePriceChange(selectedDay, slot.time, Number(e.target.value))}
-                                className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
-                              />
-                            </div>
-                            <p className="text-[10px] text-gray-500 font-semibold">
-                              Charges: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
-                            </p>
+                    {/* Main Base Price Input & Day Selector */}
+                    <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-6 shadow-2xl">
+                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+                        <div>
+                          <h3 className="font-bold text-white text-base">{ownerGround?.title || 'Ground Arena'}</h3>
+                          <div className="flex items-center gap-2.5 mt-2">
+                            <label className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                              Turf Base Price Per Hour (₹):
+                            </label>
+                            <input 
+                              type="number"
+                              value={baseGroundPrice}
+                              onChange={(e) => setEditingBasePrice(Number(e.target.value))}
+                              className="w-32 bg-[#080c14] border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-amber-500"
+                            />
                           </div>
                         </div>
-                      ))}
-                    </div>
 
-                    {/* Action Bar */}
-                    <div className="pt-4 border-t border-gray-800 flex justify-end gap-3">
-                      <button 
-                        type="button"
-                        onClick={() => showToast(`Pricing saved successfully for ${selectedDay}!`)}
-                        className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl shadow-lg transition"
-                      >
-                        Save {selectedDay} Pricing
-                      </button>
+                        {/* 7 Day Tabs */}
+                        <div className="flex gap-1 overflow-x-auto bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
+                          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+                            <button
+                              key={day}
+                              type="button"
+                              onClick={() => setSelectedDay(day)}
+                              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                                selectedDay === day
+                                  ? 'bg-amber-500 text-black shadow-md font-black'
+                                  : 'text-gray-400 hover:text-white'
+                              }`}
+                            >
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 24-Hour Custom Price Inputs Grid */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-2 no-scrollbar">
+                        {getSlotsDataForArena(ownerGround, selectedDateIndex).map((slot) => (
+                          <div 
+                            key={slot.time} 
+                            className="bg-[#080c14] border border-gray-800/80 p-3 rounded-xl space-y-2 hover:border-amber-500/40 transition"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-extrabold text-white">{slot.time}</span>
+                              {slotPrices[selectedDay]?.[slot.time] !== undefined && (
+                                <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
+                                  Custom
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="relative">
+                                <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₹</span>
+                                <input 
+                                  type="number" 
+                                  placeholder={String(baseGroundPrice)}
+                                  value={slotPrices[selectedDay]?.[slot.time] ?? slot.price}
+                                  onChange={(e) => handlePriceChange(selectedDay, slot.time, Number(e.target.value))}
+                                  className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
+                                />
+                              </div>
+                              <p className="text-[10px] text-gray-500 font-semibold">
+                                Slot Rate: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Action Bar */}
+                      <div className="pt-4 border-t border-gray-800 flex justify-end gap-3">
+                        <button 
+                          type="button"
+                          onClick={() => handleSaveOwnerPricing(ownerGround.id, baseGroundPrice)}
+                          className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl shadow-lg transition"
+                        >
+                          Save Pricing
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* TAB 4: CHECK-IN SCANNER */}
               {ownerTab === 'checkin' && (
@@ -2436,125 +2829,150 @@ export default function WinDeclareApp() {
         </div>
       )}
 
-      {/* POPUP MODAL 3: PAYMENT CHECKOUT WITH DYNAMIC QR ROUTING BASED ON PLAN */}
-      {showPaymentModal && selectedArena && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0e1320] border border-gray-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative space-y-6">
-            <button 
-              onClick={() => setShowPaymentModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-white p-1"
-            >
-              <X className="w-5 h-5" />
-            </button>
+      {/* POPUP MODAL 3: PLAYER BOOKING & PAYMENT MODAL */}
+      {showPaymentModal && selectedArena && (() => {
+        const activeDate = datesList[selectedDateIndex];
+        const selectedDateStr = activeDate ? `${activeDate.day}, Jul ${activeDate.date}` : 'Today';
+        const slotsStr = selectedSlots.length > 0 ? selectedSlots.map(s => s.time).join(', ') : '1 Hour Slot';
+        const totalAmount = selectedSlots.length > 0 
+          ? selectedSlots.reduce((acc, curr) => acc + curr.price, 0) 
+          : (selectedArena.price || 0);
 
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-xs font-bold text-amber-500 uppercase tracking-wider">
-                  <Lock className="w-3.5 h-3.5" /> Secure Checkout
-                </span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                  selectedArena.plan === 'subscription' ? 'bg-teal-500/10 border-teal-500/30 text-teal-400' : 'bg-purple-500/10 border-purple-500/30 text-purple-400'
-                }`}>
-                  {selectedArena.plan === 'subscription' ? 'Plan 1: Direct Owner QR' : 'Plan 2: Admin Commission QR'}
-                </span>
-              </div>
+        const rawNum = selectedArena.whatsappNumber || '9505737751';
+        const cleanNum = rawNum.replace(/\D/g, '');
+        const formattedPhone = cleanNum.startsWith('91') && cleanNum.length === 12 ? cleanNum : `91${cleanNum.slice(-10)}`;
+        const bookingMessage = `Hi! I would like to book ${selectedArena.title}.\n📅 Date: ${selectedDateStr}\n⏰ Slots: ${slotsStr}\n💰 Total Amount: ₹${totalAmount}\nI have made the payment. Here is my payment screenshot.`;
+        const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(bookingMessage)}`;
 
-              <h3 className="text-xl font-extrabold text-white mt-1">Scan & Pay ₹{totalPrice}</h3>
-              <p className="text-xs text-gray-400 mt-0.5">{selectedArena.title} • {selectedSlots.map(s => s.time).join(', ')}</p>
-            </div>
-
-            {/* DYNAMIC QR PAYMENT ROUTING */}
-            <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 text-center space-y-3 shadow-inner">
-              <span className="text-xs text-gray-400 font-bold block">
-                {selectedArena.plan === 'subscription' 
-                  ? 'Turf Owner Personal UPI QR Code' 
-                  : 'Platform Master Commission UPI QR Code'}
-              </span>
-
-              <div className="flex justify-center">
-                <img 
-                  src={selectedArena.plan === 'subscription'
-                    ? (selectedArena.ownerQrCodeUrl || 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=owner@okaxis')
-                    : adminQrCodeUrl} 
-                  alt="Payment QR" 
-                  className="w-44 h-44 rounded-xl bg-white p-2 border border-gray-800 shadow-md"
-                />
-              </div>
-
-              <p className="text-xs font-mono font-bold text-amber-400">
-                {selectedArena.plan === 'subscription'
-                  ? (selectedArena.ownerUpiId || 'akshay.box@okaxis')
-                  : adminUpiId}
-              </p>
-
-              <p className="text-[10px] text-gray-500">
-                {selectedArena.plan === 'subscription' 
-                  ? '✓ Payout routed directly to Turf Owner (Plan 1: Free Tier)'
-                  : '✓ Payout routed to Platform Admin for 10% Commission auto-ticket release'}
-              </p>
-            </div>
-
-            {/* Payment Method Selector */}
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => setSelectedPaymentMethod('upi')}
-                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition ${
-                  selectedPaymentMethod === 'upi'
-                    ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
-                    : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
-                }`}
+        return (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-[#0e1320] border border-amber-500/30 w-full max-w-md rounded-3xl p-6 shadow-2xl relative space-y-5">
+              <button 
+                onClick={() => setShowPaymentModal(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 bg-gray-900/80 rounded-xl z-10"
               >
-                <div className="flex items-center gap-3">
-                  <Smartphone className="w-4 h-4 text-amber-400" />
-                  <div>
-                    <p className="text-xs font-bold">UPI Apps (GPay / PhonePe / Paytm / BHIM)</p>
-                    <p className="text-[10px] text-gray-500 font-normal">Scan QR or Pay via VPA</p>
-                  </div>
-                </div>
-                {selectedPaymentMethod === 'upi' && <CheckCircle className="w-4 h-4 text-amber-500" />}
+                <X className="w-5 h-5" />
               </button>
 
-              <button
-                type="button"
-                onClick={() => setSelectedPaymentMethod('card')}
-                className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition ${
-                  selectedPaymentMethod === 'card'
-                    ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold'
-                    : 'bg-[#080c14] border-gray-800 text-gray-300 hover:border-gray-700'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <CreditCard className="w-4 h-4 text-amber-400" />
-                  <div>
-                    <p className="text-xs font-bold">Credit / Debit Card</p>
-                    <p className="text-[10px] text-gray-500 font-normal">Visa, Mastercard, RuPay</p>
+              {/* a) Turf Name, Price & Booking Breakdown */}
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">
+                  <Lock className="w-3.5 h-3.5" /> Direct Owner Payment Checkout
+                </div>
+                <h3 className="text-2xl font-black text-white">{selectedArena.title}</h3>
+
+                {/* Selected Date, Slots & Total Amount Breakdown */}
+                <div className="mt-3 bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-2 text-xs">
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span className="font-semibold text-gray-400">📅 Selected Date:</span>
+                    <span className="font-bold text-white">{selectedDateStr}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-gray-300">
+                    <span className="font-semibold text-gray-400">⏰ Selected Slots ({selectedSlots.length || 1}):</span>
+                    <span className="font-mono font-bold text-amber-400 truncate max-w-[200px]">{slotsStr}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-gray-800/80">
+                    <span className="font-extrabold text-white text-sm">Total Amount Payable:</span>
+                    <span className="text-xl font-black text-amber-400 font-mono">₹{totalAmount}</span>
                   </div>
                 </div>
-                {selectedPaymentMethod === 'card' && <CheckCircle className="w-4 h-4 text-amber-500" />}
+              </div>
+
+              {/* b) Owner's Payment QR Code Image */}
+              <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-5 text-center space-y-3 shadow-inner">
+                <span className="text-xs text-gray-400 font-bold block uppercase tracking-wider">
+                  Scan Owner Payment QR Code
+                </span>
+
+                <div className="flex justify-center">
+                  <img 
+                    src={selectedArena.ownerQrCodeUrl || selectedArena.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=${encodeURIComponent(selectedArena.ownerUpiId || selectedArena.upiId || 'owner@okaxis')}`} 
+                    alt="Owner Payment QR" 
+                    className="w-48 h-48 rounded-2xl bg-white p-2 border border-amber-500/20 shadow-xl object-contain"
+                  />
+                </div>
+
+                {/* c) Owner's UPI ID with Copy UPI ID button */}
+                <div className="flex items-center justify-between gap-2 bg-[#0e1320] border border-gray-800 p-3 rounded-xl">
+                  <span className="text-xs font-mono font-bold text-amber-400 truncate">
+                    {selectedArena.ownerUpiId || selectedArena.upiId || 'owner@okaxis'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const upi = selectedArena.ownerUpiId || selectedArena.upiId || 'owner@okaxis';
+                      navigator.clipboard.writeText(upi);
+                      showToast('✓ Copied UPI ID: ' + upi);
+                    }}
+                    className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400 text-xs font-extrabold rounded-lg transition whitespace-nowrap"
+                  >
+                    Copy UPI ID
+                  </button>
+                </div>
+              </div>
+
+              {/* d) Button: Share Payment Screenshot via WhatsApp */}
+              <button
+                type="button"
+                onClick={async () => {
+                  const selectedGround = selectedArena;
+                  const selectedDate = selectedDateStr;
+                  const targetDate = new Date();
+                  targetDate.setDate(targetDate.getDate() + selectedDateIndex);
+                  const formattedIsoDate = targetDate.toISOString().split('T')[0];
+
+                  // 1. Database Record: Insert payload into Supabase `bookings` table
+                  try {
+                    const { data, error } = await supabase.from('bookings').insert([
+                      {
+                        ground_id: selectedGround.id,
+                        booking_date: formattedIsoDate,
+                        slots: selectedSlots.length > 0 ? selectedSlots : slotsStr,
+                        total_amount: totalAmount,
+                        status: 'pending'
+                      }
+                    ]);
+
+                    if (error) {
+                      console.warn("Supabase booking insert notice:", error.message);
+                      // Fallback retry with string date if text column
+                      await supabase.from('bookings').insert([
+                        {
+                          ground_id: selectedGround.id,
+                          booking_date: selectedDate,
+                          slots: slotsStr,
+                          total_amount: totalAmount,
+                          status: 'pending'
+                        }
+                      ]);
+                    }
+                  } catch (err) {
+                    console.error("Booking insert exception:", err);
+                  }
+
+                  // 3. Prevent Double Booking: Disable booked/pending slots on the calendar
+                  const slotsToLock = selectedSlots.length > 0 ? selectedSlots : [{ time: slotsStr, price: totalAmount }];
+                  const newLockedSlots: BookedSlot[] = slotsToLock.map(s => ({
+                    arenaId: selectedGround.id as any,
+                    dateIndex: selectedDateIndex,
+                    time: s.time
+                  }));
+                  setBookedSlots(prev => [...prev, ...newLockedSlots]);
+                  setSelectedSlots([]);
+
+                  // 2. User UX Feedback: Open WhatsApp in new tab, close modal & display pending toast notification
+                  window.open(waUrl, '_blank');
+                  setShowPaymentModal(false);
+                  showToast("Your booking request is PENDING! Please send your screenshot on WhatsApp so the owner can confirm your slots.");
+                }}
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold py-3.5 rounded-2xl transition text-xs shadow-lg flex items-center justify-center gap-2 shadow-emerald-500/20"
+              >
+                <Phone className="w-4 h-4 fill-black" /> Share Payment Screenshot via WhatsApp
               </button>
             </div>
-
-            {/* Submit Payment Button */}
-            <button
-              type="button"
-              disabled={isProcessingPayment}
-              onClick={handleProcessPayment}
-              className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold py-3.5 rounded-xl transition text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
-            >
-              {isProcessingPayment ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Verifying & Confirming Slot...
-                </>
-              ) : (
-                <>
-                  <Lock className="w-4 h-4 stroke-[3]" /> Confirm Payment of ₹{totalPrice}
-                </>
-              )}
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Footer */}
       <footer className="border-t border-gray-800 bg-[#0a0e17] py-8 text-xs text-gray-500">
