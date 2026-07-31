@@ -33,6 +33,7 @@ interface Arena {
   qr_code_url?: string;
   ownerEmail?: string;
   owner_id?: string;
+  user_id?: string;
   upiId?: string;
   whatsappNumber?: string;
   status?: string;
@@ -48,6 +49,7 @@ interface Booking {
   slots: string;
   amount: number;
   userContact: string;
+  user_id?: string;
   planUsed: 'subscription' | 'commission';
   paymentQrUsed: string;
   createdAt: string;
@@ -103,7 +105,7 @@ export default function WinDeclareApp() {
   ]);
 
   // User Favorites State
-  const [favoriteArenaIds, setFavoriteArenaIds] = useState<number[]>([1]);
+  const [favoriteArenaIds, setFavoriteArenaIds] = useState<number[]>([]);
 
   // Auth States (Google OAuth Only)
   const [currentUser, setCurrentUser] = useState<{ id?: string; name: string; username?: string; phone?: string; email?: string; provider: 'phone' | 'google' | 'password'; role?: string } | null>(null);
@@ -522,6 +524,8 @@ export default function WinDeclareApp() {
           locationUrl: item.location_url || item.locationUrl || '',
           plan: item.plan || 'subscription',
           ownerEmail: item.owner_email || item.ownerEmail || 'owner@turf.in',
+          owner_id: item.owner_id || item.user_id || item.ownerId || '',
+          user_id: item.user_id || item.owner_id || item.userId || '',
           ownerUpiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
           ownerQrCodeUrl: item.qr_code_url || item.ownerQrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${item.upi_id || item.owner_upi_id || 'owner@okaxis'}`,
           upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
@@ -693,16 +697,7 @@ export default function WinDeclareApp() {
     });
   };
 
-  const toggleFavorite = (arenaId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (favoriteArenaIds.includes(arenaId)) {
-      setFavoriteArenaIds(favoriteArenaIds.filter(id => id !== arenaId));
-      showToast('Removed from favorites');
-    } else {
-      setFavoriteArenaIds([...favoriteArenaIds, arenaId]);
-      showToast('Added to favorites ❤️');
-    }
-  };
+
 
   const handleNavigate = (title: string, location: string, locationUrl?: string) => {
     if (locationUrl && locationUrl.trim() !== '') {
@@ -767,6 +762,82 @@ export default function WinDeclareApp() {
       if (selectedSlots.length > 0) {
         setShowPaymentModal(true);
       }
+    }
+  };
+
+  // Fetch user favorites from Supabase table filtering strictly by currentUser.id
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setFavoriteArenaIds([]);
+      return;
+    }
+    const fetchUserFavorites = async () => {
+      try {
+        let { data, error } = await supabase
+          .from('favorite_arenas')
+          .select('arena_id')
+          .eq('user_id', currentUser.id);
+
+        if (error || !data || data.length === 0) {
+          const { data: favData } = await supabase
+            .from('favorites')
+            .select('arena_id')
+            .eq('user_id', currentUser.id);
+          if (favData) data = favData;
+        }
+
+        if (data && data.length > 0) {
+          const ids = data.map((item: any) => Number(item.arena_id)).filter(Boolean);
+          setFavoriteArenaIds(ids);
+        } else {
+          setFavoriteArenaIds([]);
+        }
+      } catch (err) {
+        console.error("Error fetching user favorites:", err);
+      }
+    };
+    fetchUserFavorites();
+  }, [currentUser]);
+
+  // TOGGLE FAVORITE ARENA HANDLER WITH USER ISOLATION
+  const toggleFavorite = async (arenaId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!currentUser) {
+      setShowAuthModal(true);
+      showToast('🔒 Please sign in to save favorite grounds!');
+      return;
+    }
+
+    const isFav = favoriteArenaIds.includes(arenaId);
+    const updated = isFav 
+      ? favoriteArenaIds.filter(id => id !== arenaId)
+      : [...favoriteArenaIds, arenaId];
+    
+    setFavoriteArenaIds(updated);
+    showToast(isFav ? 'Removed from Favorites' : '❤️ Added to Favorites!');
+
+    try {
+      if (isFav) {
+        await supabase
+          .from('favorite_arenas')
+          .delete()
+          .eq('user_id', currentUser.id)
+          .eq('arena_id', arenaId);
+        await supabase
+          .from('favorites')
+          .delete()
+          .eq('user_id', currentUser.id)
+          .eq('arena_id', arenaId);
+      } else {
+        await supabase
+          .from('favorite_arenas')
+          .insert([{ user_id: currentUser.id, arena_id: arenaId }]);
+        await supabase
+          .from('favorites')
+          .insert([{ user_id: currentUser.id, arena_id: arenaId }]);
+      }
+    } catch (err) {
+      console.warn("Supabase favorite toggle notice:", err);
     }
   };
 
@@ -851,6 +922,7 @@ export default function WinDeclareApp() {
         booking_id: newBooking.id,
         arena_id: newBooking.arenaId,
         arena_title: newBooking.arenaTitle,
+        user_id: currentUser?.id || '',
         date: newBooking.date,
         date_index: newBooking.dateIndex,
         slots: newBooking.slots,
@@ -867,6 +939,7 @@ export default function WinDeclareApp() {
           id: newBooking.id,
           arenaId: newBooking.arenaId,
           arenaTitle: newBooking.arenaTitle,
+          user_id: currentUser?.id || '',
           date: newBooking.date,
           dateIndex: newBooking.dateIndex,
           slots: newBooking.slots,
@@ -990,6 +1063,7 @@ export default function WinDeclareApp() {
       plan: newArenaPlan,
       ownerEmail: currentOwnerEmail,
       owner_id: currentOwnerId,
+      user_id: currentOwnerId,
       ownerUpiId: upi,
       ownerQrCodeUrl: qrUrl,
       upiId: upi,
@@ -998,7 +1072,7 @@ export default function WinDeclareApp() {
       is_verified: false
     };
 
-    // Save/Insert Ground directly into Supabase database with status: 'pending', owner_id, owner_email, and whatsapp_number
+    // Save/Insert Ground directly into Supabase database with status: 'pending', user_id, owner_id, owner_email, and whatsapp_number
     (async () => {
       try {
         const qrCodeUrl = newTurf.qrCodeUrl || '';
@@ -1012,6 +1086,7 @@ export default function WinDeclareApp() {
           sports: Array.isArray(newTurf.sports) ? newTurf.sports : [],
           facilities: Array.isArray(newTurf.facilities) ? newTurf.facilities : [],
           status: 'pending',
+          user_id: currentOwnerId,
           owner_id: currentOwnerId,
           owner_email: currentOwnerEmail
         };
@@ -2054,17 +2129,17 @@ export default function WinDeclareApp() {
         {/* VIEW 4: OWNER PORTAL (PRIMARY FULL-SCREEN VIEW WITHOUT INTRUSIVE LEFT SIDEBAR) */}
         {view === 'owner-portal' && (() => {
           const ownerTurfs = arenas.filter(a => {
-            if (!currentUser) return true;
+            if (!currentUser) return false;
             const userId = String(currentUser.id || '');
             const userEmail = currentUser.email?.toLowerCase();
-            const ownerId = a.owner_id ? String(a.owner_id) : '';
+            const turfUserId = a.user_id ? String(a.user_id) : '';
+            const turfOwnerId = a.owner_id ? String(a.owner_id) : '';
             const ownerEmail = a.ownerEmail?.toLowerCase();
 
             return (
-              (ownerId && ownerId === userId) ||
-              (ownerEmail && userEmail && ownerEmail === userEmail) ||
-              !a.owner_id ||
-              a.ownerEmail === 'owner@windeclare.in'
+              (turfUserId && turfUserId === userId) ||
+              (turfOwnerId && turfOwnerId === userId) ||
+              (ownerEmail && userEmail && ownerEmail === userEmail)
             );
           });
 
@@ -2079,35 +2154,53 @@ export default function WinDeclareApp() {
                 {/* TAB 0: DEFAULT DAILY CALENDAR & OFFLINE DIRECT BOOKINGS */}
                 {ownerTab === 'calendar' && (
                   <div className="space-y-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div>
-                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                          Daily Time Slot Calendar
-                        </span>
-                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Venue Slot Availability</h2>
-                        <p className="text-xs text-gray-400 mt-0.5">Manage live slot states and record offline walk-in bookings</p>
-                      </div>
-
-                      {/* Turf Selection Dropdown (STRICT BINDING BY UUID/ID) */}
-                      {ownerTurfs.length > 0 && (
-                        <div className="self-start sm:self-auto">
-                          <select
-                            value={String(activeOwnerTurf?.id || '')}
-                            onChange={(e) => {
-                              const selectedId = e.target.value;
-                              setSelectedOwnerTurfId(selectedId);
-                              const found = ownerTurfs.find(t => String(t.id) === selectedId);
-                              if (found) setSelectedArena(found);
-                            }}
-                            className="bg-[#0e1320] border border-gray-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 cursor-pointer"
-                          >
-                            {ownerTurfs.map(t => (
-                              <option key={String(t.id)} value={String(t.id)}>{t.title}</option>
-                            ))}
-                          </select>
+                    {ownerTurfs.length === 0 ? (
+                      <div className="text-center py-16 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-3xl space-y-4 shadow-xl">
+                        <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto text-amber-400">
+                          <Calendar className="w-8 h-8" />
                         </div>
-                      )}
-                    </div>
+                        <div className="space-y-1">
+                          <h3 className="text-xl font-bold text-white">No listed grounds found</h3>
+                          <p className="text-xs text-gray-400 max-w-md mx-auto">
+                            Add a turf in the Listings Manager first to view and manage daily time slots.
+                          </p>
+                        </div>
+                        <button 
+                          onClick={() => { setOwnerTab('listings'); setShowAddTurfForm(true); }}
+                          className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition inline-flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                        >
+                          <Plus className="w-4 h-4 stroke-[3]" /> Add New Turf Venue
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div>
+                            <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                              Daily Time Slot Calendar
+                            </span>
+                            <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Venue Slot Availability</h2>
+                            <p className="text-xs text-gray-400 mt-0.5">Manage live slot states and record offline walk-in bookings</p>
+                          </div>
+
+                          {/* Turf Selection Dropdown (STRICT BINDING BY UUID/ID) */}
+                          <div className="self-start sm:self-auto">
+                            <select
+                              value={String(activeOwnerTurf?.id || '')}
+                              onChange={(e) => {
+                                const selectedId = e.target.value;
+                                setSelectedOwnerTurfId(selectedId);
+                                const found = ownerTurfs.find(t => String(t.id) === selectedId);
+                                if (found) setSelectedArena(found);
+                              }}
+                              className="bg-[#0e1320] border border-gray-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 cursor-pointer"
+                            >
+                              {ownerTurfs.map(t => (
+                                <option key={String(t.id)} value={String(t.id)}>{t.title}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
 
                     {/* Date Selector */}
                     <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-4 space-y-4 shadow-xl">
@@ -2137,8 +2230,7 @@ export default function WinDeclareApp() {
                     </div>
 
                     {/* 24-Hour Slots Grid for Selected Date */}
-                    {activeOwnerTurf ? (
-                      <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 space-y-5 shadow-xl">
+                    <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 space-y-5 shadow-xl">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-800 pb-3">
                           <h3 className="font-extrabold text-white text-base flex items-center gap-2">
                             <Clock className="w-4 h-4 text-amber-500" /> 24-Hour Time Slots ({activeOwnerTurf.title})
@@ -2235,15 +2327,10 @@ export default function WinDeclareApp() {
                           })}
                         </div>
                       </div>
-                    ) : (
-                      <div className="text-center py-16 bg-[#080c14] border border-dashed border-gray-800 rounded-3xl space-y-3">
-                        <Building2 className="w-10 h-10 text-amber-500 mx-auto opacity-80" />
-                        <h3 className="text-lg font-bold text-white">No turf selected</h3>
-                        <p className="text-xs text-gray-400">List a ground arena to view slot availability.</p>
-                      </div>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
+              )}
 
                 {/* TAB 1: LISTINGS MANAGER & ADD NEW VENUE FORM */}
                 {ownerTab === 'listings' && (
@@ -2670,99 +2757,148 @@ export default function WinDeclareApp() {
         })()}
 
         {/* VIEW 5: USER PROFILE VIEW (BOOKINGS, FAVORITES, ACCOUNT) */}
-        {view === 'profile' && (
-          <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-            <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black text-xl flex items-center justify-center shadow-lg">
-                  {currentUser ? currentUser.name.charAt(0) : 'P'}
+        {view === 'profile' && (() => {
+          const playerBookings = myBookings.filter(b => {
+            if (!currentUser) return false;
+            const userId = String(currentUser.id || '');
+            const userContact = currentUser.phone || currentUser.email;
+            const bookingUserId = b.user_id ? String(b.user_id) : '';
+
+            return (
+              (bookingUserId && bookingUserId === userId) ||
+              (userContact && b.userContact && b.userContact.toLowerCase() === userContact.toLowerCase())
+            );
+          });
+
+          const playerFavoriteArenas = arenas.filter(a => favoriteArenaIds.includes(Number(a.id)));
+
+          return (
+            <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black text-xl flex items-center justify-center shadow-lg">
+                    {currentUser ? currentUser.name.charAt(0) : 'P'}
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-extrabold text-white">{currentUser?.name || 'Guest Player'}</h2>
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">{currentUser?.phone || currentUser?.email || 'Guest Session'}</p>
+                    <span className="inline-block mt-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                      ✓ Verified Player
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-xl font-extrabold text-white">{currentUser?.name || 'Guest Player'}</h2>
-                  <p className="text-xs text-gray-400 font-mono mt-0.5">{currentUser?.phone || currentUser?.email || 'Guest Session'}</p>
-                  <span className="inline-block mt-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
-                    ✓ Verified Player
-                  </span>
+
+                {/* Profile Sub-Tabs */}
+                <div className="flex gap-1 bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
+                  <button
+                    onClick={() => setProfileTab('bookings')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'bookings' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    My Bookings ({playerBookings.length})
+                  </button>
+                  <button
+                    onClick={() => setProfileTab('favorites')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'favorites' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    Favorites ({playerFavoriteArenas.length})
+                  </button>
+                  <button
+                    onClick={() => setProfileTab('account')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'account' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    Account
+                  </button>
                 </div>
               </div>
 
-              {/* Profile Sub-Tabs */}
-              <div className="flex gap-1 bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
-                <button
-                  onClick={() => setProfileTab('bookings')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'bookings' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
-                >
-                  My Bookings ({myBookings.length})
-                </button>
-                <button
-                  onClick={() => setProfileTab('favorites')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'favorites' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
-                >
-                  Favorites ({favoriteArenaIds.length})
-                </button>
-                <button
-                  onClick={() => setProfileTab('account')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'account' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
-                >
-                  Account
-                </button>
-              </div>
-            </div>
+              {/* TAB CONTENT: MY BOOKINGS (USER ISOLATED) */}
+              {profileTab === 'bookings' && (
+                <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-amber-500" /> Confirmed Booking Tickets
+                  </h3>
 
-            {/* TAB CONTENT: MY BOOKINGS */}
-            {profileTab === 'bookings' && (
-              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-amber-500" /> Confirmed Booking Tickets
-                </h3>
-
-                <div className="space-y-4">
-                  {myBookings.map((b) => (
-                    <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono font-bold text-amber-400">{b.id}</span>
-                          {b.booking_type === 'offline' && (
-                            <span className="bg-purple-500/20 text-purple-300 text-[9px] font-bold px-1.5 py-0.5 rounded">Offline</span>
-                          )}
-                        </div>
-                        <h4 className="font-bold text-white text-xs">{b.arenaTitle}</h4>
-                        <p className="text-[10px] text-gray-400">{b.date} • {b.slots}</p>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="text-sm font-bold text-white font-mono block">₹{b.amount}</span>
-                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">✓ Confirmed</span>
-                      </div>
+                  {playerBookings.length === 0 ? (
+                    <div className="text-center py-12 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-2xl space-y-3">
+                      <Calendar className="w-8 h-8 text-amber-500 mx-auto opacity-70" />
+                      <h4 className="text-sm font-bold text-white">No upcoming bookings found</h4>
+                      <p className="text-xs text-gray-400">Browse available grounds and book your first slot!</p>
+                      <button 
+                        onClick={() => setView('browse')}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/20"
+                      >
+                        Browse Sports Grounds
+                      </button>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                  ) : (
+                    <div className="space-y-4">
+                      {playerBookings.map((b) => (
+                        <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono font-bold text-amber-400">{b.id}</span>
+                              {b.booking_type === 'offline' && (
+                                <span className="bg-purple-500/20 text-purple-300 text-[9px] font-bold px-1.5 py-0.5 rounded">Offline</span>
+                              )}
+                            </div>
+                            <h4 className="font-bold text-white text-xs">{b.arenaTitle}</h4>
+                            <p className="text-[10px] text-gray-400">{b.date} • {b.slots}</p>
+                          </div>
 
-            {/* TAB CONTENT: FAVORITES */}
-            {profileTab === 'favorites' && (
-              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Heart className="w-4 h-4 text-rose-500 fill-rose-500" /> Saved Favorite Turfs
-                </h3>
-
-                <div className="grid md:grid-cols-2 gap-4">
-                  {arenas.filter(a => favoriteArenaIds.includes(Number(a.id))).map((arena) => (
-                    <div key={arena.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <img src={arena.image} alt={arena.title} className="w-12 h-12 rounded-lg object-cover" />
-                        <div>
-                          <h4 className="font-bold text-white text-xs">{arena.title}</h4>
-                          <p className="text-[10px] text-gray-400">{arena.location}</p>
-                          <p className="text-[10px] font-bold text-amber-400 mt-0.5">₹{arena.price}/hr • ★ {arena.rating}</p>
+                          <div className="text-right">
+                            <span className="text-sm font-bold text-white font-mono block">₹{b.amount}</span>
+                            <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">✓ Confirmed</span>
+                          </div>
                         </div>
-                      </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              </div>
-            )}
+              )}
+
+              {/* TAB CONTENT: FAVORITES (USER ISOLATED) */}
+              {profileTab === 'favorites' && (
+                <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Heart className="w-4 h-4 text-rose-500 fill-rose-500" /> Saved Favorite Turfs
+                  </h3>
+
+                  {playerFavoriteArenas.length === 0 ? (
+                    <div className="text-center py-12 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-2xl space-y-3">
+                      <Heart className="w-8 h-8 text-rose-500 mx-auto opacity-70" />
+                      <h4 className="text-sm font-bold text-white">No saved favorite turfs</h4>
+                      <p className="text-xs text-gray-400">Click the heart icon on any turf card to save it here!</p>
+                      <button 
+                        onClick={() => setView('browse')}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/20"
+                      >
+                        Explore Turfs
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid md:grid-cols-2 gap-4">
+                      {playerFavoriteArenas.map((arena) => (
+                        <div key={arena.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <img src={arena.image} alt={arena.title} className="w-12 h-12 rounded-lg object-cover" />
+                            <div>
+                              <h4 className="font-bold text-white text-xs">{arena.title}</h4>
+                              <p className="text-[10px] text-gray-400">{arena.location}</p>
+                              <p className="text-[10px] font-bold text-amber-400 mt-0.5">₹{arena.price}/hr • ★ {arena.rating}</p>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={(e) => toggleFavorite(Number(arena.id), e)}
+                            className="p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 transition"
+                          >
+                            <Heart className="w-4 h-4 fill-rose-500 text-rose-500" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
             {/* TAB CONTENT: ACCOUNT SETTINGS */}
             {profileTab === 'account' && (
@@ -2801,7 +2937,8 @@ export default function WinDeclareApp() {
               </div>
             )}
           </main>
-        )}
+          );
+        })()}
       </div>
 
       {/* POPUP MODAL: GOOGLE AUTHENTICATION ONLY */}
