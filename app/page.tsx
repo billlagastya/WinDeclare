@@ -427,7 +427,7 @@ export default function WinDeclareApp() {
     };
   }, []);
 
-  // Fetch initial bookings from Supabase
+  // Fetch initial bookings from Supabase & hydrate locked slots across page refreshes
   useEffect(() => {
     const fetchBookingsFromSupabase = async () => {
       try {
@@ -435,17 +435,21 @@ export default function WinDeclareApp() {
         if (!error && data && data.length > 0) {
           const mapped: Booking[] = data.map((item: any) => ({
             id: item.booking_id || item.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-            arenaId: item.arena_id || item.arenaId || 1,
+            arenaId: Number(item.arena_id || item.ground_id || item.arenaId || 1),
             arenaTitle: item.arena_title || item.arenaTitle || 'Arena',
-            date: item.date || '',
+            date: item.date || item.booking_date || '',
             dateIndex: item.date_index ?? item.dateIndex ?? 0,
-            slots: item.slots || '',
-            amount: item.amount || 0,
+            slots: typeof item.slots === 'string' ? item.slots : (Array.isArray(item.slots) ? item.slots.map((s: any) => typeof s === 'string' ? s : s.time).join(', ') : ''),
+            amount: Number(item.amount || item.total_amount || 0),
             userContact: item.user_contact || item.userContact || '',
+            user_id: item.user_id || item.userId || '',
             planUsed: item.plan_used || item.planUsed || 'subscription',
             paymentQrUsed: item.payment_qr_used || item.paymentQrUsed || '',
-            createdAt: item.created_at || item.createdAt || ''
+            booking_type: item.booking_type || 'online',
+            payment_status: item.payment_status || item.status || 'completed',
+            createdAt: item.created_at || item.createdAt || new Date().toISOString()
           }));
+
           setMyBookings(prev => {
             const combined = [...mapped];
             prev.forEach(p => {
@@ -453,6 +457,32 @@ export default function WinDeclareApp() {
             });
             return combined;
           });
+
+          // Hydrate locked slots into bookedSlots state so slots show unavailable/disabled (BOOKED) across page refreshes
+          const extractedLockedSlots: BookedSlot[] = [];
+          data.forEach((item: any) => {
+            const arenaId = Number(item.arena_id || item.ground_id || item.arenaId || 1);
+            const dateIndex = Number(item.date_index ?? item.dateIndex ?? 0);
+            const slotsVal = item.slots;
+
+            if (typeof slotsVal === 'string') {
+              slotsVal.split(',').forEach((t: string) => {
+                const timeStr = t.trim();
+                if (timeStr && !extractedLockedSlots.some(s => s.arenaId === arenaId && s.dateIndex === dateIndex && s.time === timeStr)) {
+                  extractedLockedSlots.push({ arenaId, dateIndex, time: timeStr });
+                }
+              });
+            } else if (Array.isArray(slotsVal)) {
+              slotsVal.forEach((s: any) => {
+                const timeStr = (typeof s === 'string' ? s : s.time)?.trim();
+                if (timeStr && !extractedLockedSlots.some(s => s.arenaId === arenaId && s.dateIndex === dateIndex && s.time === timeStr)) {
+                  extractedLockedSlots.push({ arenaId, dateIndex, time: timeStr });
+                }
+              });
+            }
+          });
+
+          setBookedSlots(extractedLockedSlots);
         }
       } catch (e) {
         console.error("Supabase initial fetch bookings error:", e);
@@ -916,20 +946,22 @@ export default function WinDeclareApp() {
       time: s.time
     }));
 
-    // Save Booking Record directly to Supabase `bookings` table
+    // Save Booking Record directly to Supabase `bookings` table with status: 'booked'
     try {
       const { error } = await supabase.from('bookings').insert([{
         booking_id: newBooking.id,
-        arena_id: newBooking.arenaId,
-        arena_title: newBooking.arenaTitle,
+        arena_id: Number(selectedArena.id),
+        ground_id: Number(selectedArena.id),
+        arena_title: selectedArena.title,
         user_id: currentUser?.id || '',
         date: newBooking.date,
-        date_index: newBooking.dateIndex,
+        date_index: selectedDateIndex,
         slots: newBooking.slots,
         amount: newBooking.amount,
         user_contact: newBooking.userContact,
         plan_used: newBooking.planUsed,
         payment_qr_used: newBooking.paymentQrUsed,
+        status: 'booked',
         created_at: newBooking.createdAt
       }]);
 
@@ -937,16 +969,18 @@ export default function WinDeclareApp() {
         console.warn("Supabase insert warning (retrying with alternative schema):", error.message);
         await supabase.from('bookings').insert([{
           id: newBooking.id,
-          arenaId: newBooking.arenaId,
-          arenaTitle: newBooking.arenaTitle,
+          arenaId: Number(selectedArena.id),
+          ground_id: Number(selectedArena.id),
+          arenaTitle: selectedArena.title,
           user_id: currentUser?.id || '',
           date: newBooking.date,
-          dateIndex: newBooking.dateIndex,
+          dateIndex: selectedDateIndex,
           slots: newBooking.slots,
           amount: newBooking.amount,
           userContact: newBooking.userContact,
           planUsed: newBooking.planUsed,
           paymentQrUsed: newBooking.paymentQrUsed,
+          status: 'booked',
           createdAt: newBooking.createdAt
         }]);
       }
@@ -2270,8 +2304,10 @@ export default function WinDeclareApp() {
                                 try {
                                   await supabase.from('bookings').insert([{
                                     booking_id: offlineBooking.id,
-                                    arena_id: offlineBooking.arenaId,
+                                    arena_id: Number(activeOwnerTurf.id),
+                                    ground_id: Number(activeOwnerTurf.id),
                                     arena_title: offlineBooking.arenaTitle,
+                                    user_id: currentUser?.id || '',
                                     date: offlineBooking.date,
                                     date_index: offlineBooking.dateIndex,
                                     slots: offlineBooking.slots,
@@ -2281,6 +2317,7 @@ export default function WinDeclareApp() {
                                     payment_qr_used: offlineBooking.paymentQrUsed,
                                     booking_type: 'offline',
                                     payment_status: 'offline_cash',
+                                    status: 'booked',
                                     created_at: offlineBooking.createdAt
                                   }]);
                                 } catch (e) {
@@ -3144,30 +3181,51 @@ export default function WinDeclareApp() {
                   targetDate.setDate(targetDate.getDate() + selectedDateIndex);
                   const formattedIsoDate = targetDate.toISOString().split('T')[0];
 
-                  // 1. Database Record: Insert payload into Supabase `bookings` table
+                  // 1. Database Record: Insert payload into Supabase `bookings` table with status: 'booked'
                   try {
-                    const { data, error } = await supabase.from('bookings').insert([
-                      {
-                        ground_id: selectedGround.id,
-                        booking_date: formattedIsoDate,
-                        slots: selectedSlots.length > 0 ? selectedSlots : slotsStr,
-                        total_amount: totalAmount,
-                        status: 'pending'
-                      }
-                    ]);
+                    const bookingRecord = {
+                      booking_id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+                      arena_id: Number(selectedGround.id),
+                      ground_id: Number(selectedGround.id),
+                      arena_title: selectedGround.title,
+                      user_id: currentUser?.id || '',
+                      date: selectedDate,
+                      booking_date: formattedIsoDate,
+                      date_index: selectedDateIndex,
+                      slots: slotsStr,
+                      amount: totalAmount,
+                      total_amount: totalAmount,
+                      user_contact: currentUser?.phone || currentUser?.email || 'Player Session',
+                      plan_used: selectedGround.plan || 'subscription',
+                      payment_qr_used: selectedGround.ownerUpiId || 'owner@okaxis',
+                      status: 'booked',
+                      payment_status: 'pending_whatsapp',
+                      created_at: new Date().toISOString()
+                    };
+
+                    const newBookingObj: Booking = {
+                      id: bookingRecord.booking_id,
+                      arenaId: Number(selectedGround.id),
+                      arenaTitle: selectedGround.title,
+                      date: selectedDate,
+                      dateIndex: selectedDateIndex,
+                      slots: slotsStr,
+                      amount: totalAmount,
+                      userContact: bookingRecord.user_contact,
+                      user_id: currentUser?.id || '',
+                      planUsed: selectedGround.plan || 'subscription',
+                      paymentQrUsed: selectedGround.ownerUpiId || 'owner@okaxis',
+                      booking_type: 'online',
+                      payment_status: 'pending_whatsapp',
+                      createdAt: bookingRecord.created_at
+                    };
+
+                    setMyBookings(prev => [newBookingObj, ...prev]);
+
+                    const { data, error } = await supabase.from('bookings').insert([bookingRecord]);
 
                     if (error) {
                       console.warn("Supabase booking insert notice:", error.message);
-                      // Fallback retry with string date if text column
-                      await supabase.from('bookings').insert([
-                        {
-                          ground_id: selectedGround.id,
-                          booking_date: selectedDate,
-                          slots: slotsStr,
-                          total_amount: totalAmount,
-                          status: 'pending'
-                        }
-                      ]);
                     }
                   } catch (err) {
                     console.error("Booking insert exception:", err);
