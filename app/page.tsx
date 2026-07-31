@@ -30,6 +30,7 @@ interface Arena {
   plan?: 'subscription' | 'commission';
   ownerUpiId?: string;
   ownerQrCodeUrl?: string;
+  qr_code_url?: string;
   ownerEmail?: string;
   upiId?: string;
   whatsappNumber?: string;
@@ -805,14 +806,14 @@ export default function WinDeclareApp() {
     const activeDate = datesList[selectedDateIndex];
     const newBooking: Booking = {
       id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-      arenaId: selectedArena.id,
+      arenaId: Number(selectedArena.id),
       arenaTitle: selectedArena.title,
       date: `${activeDate.day}, Jul ${activeDate.date}`,
       dateIndex: selectedDateIndex,
       slots: selectedSlots.map(s => s.time).join(', '),
       amount: totalPrice,
       userContact: currentUser?.phone || currentUser?.email || '+91 9505737751',
-      planUsed: selectedArena.plan,
+      planUsed: selectedArena.plan || 'subscription',
       paymentQrUsed: selectedArena.plan === 'subscription' 
         ? (selectedArena.ownerUpiId || 'owner@okaxis') 
         : adminUpiId,
@@ -821,7 +822,7 @@ export default function WinDeclareApp() {
 
     // LOCK SLOTS FOR DOUBLE-BOOKING PREVENTION
     const newLockedSlots: BookedSlot[] = selectedSlots.map(s => ({
-      arenaId: selectedArena.id,
+      arenaId: Number(selectedArena.id),
       dateIndex: selectedDateIndex,
       time: s.time
     }));
@@ -1327,7 +1328,7 @@ export default function WinDeclareApp() {
                     ? calculateDistance(userLocation.lat, userLocation.lng, arena.lat, arena.lng)
                     : null;
 
-                  const isFav = favoriteArenaIds.includes(arena.id);
+                  const isFav = favoriteArenaIds.includes(Number(arena.id));
 
                   return (
                     <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-amber-500/40 transition flex flex-col justify-between shadow-xl group">
@@ -1337,7 +1338,7 @@ export default function WinDeclareApp() {
                           
                           {/* Favorite Button */}
                           <button 
-                            onClick={(e) => toggleFavorite(arena.id, e)}
+                            onClick={(e) => toggleFavorite(Number(arena.id), e)}
                             className="absolute top-3 right-3 bg-black/60 backdrop-blur p-2 rounded-xl border border-white/10 hover:scale-110 transition z-10"
                           >
                             <Heart className={`w-4 h-4 ${isFav ? 'fill-rose-500 text-rose-500' : 'text-white'}`} />
@@ -2625,7 +2626,7 @@ export default function WinDeclareApp() {
                 </h3>
 
                 <div className="grid md:grid-cols-2 gap-4">
-                  {arenas.filter(a => favoriteArenaIds.includes(a.id)).map((arena) => (
+                  {arenas.filter(a => favoriteArenaIds.includes(Number(a.id))).map((arena) => (
                     <div key={arena.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <img src={arena.image} alt={arena.title} className="w-12 h-12 rounded-lg object-cover" />
