@@ -147,7 +147,7 @@ export default function WinDeclareApp() {
   const [newArenaName, setNewArenaName] = useState<string>('');
   const [newArenaLocation, setNewArenaLocation] = useState<string>('');
   const [newArenaPrice, setNewArenaPrice] = useState<number>(1200);
-  const [newArenaEmail, setNewArenaEmail] = useState<string>('owner@windeclare.in');
+  const [newArenaEmail, setNewArenaEmail] = useState<string>('');
   const [newArenaLocationUrl, setNewArenaLocationUrl] = useState<string>('');
   const [newArenaQrCodeUrl, setNewArenaQrCodeUrl] = useState<string>('');
   const [newArenaPlan, setNewArenaPlan] = useState<'subscription' | 'commission'>('subscription');
@@ -157,6 +157,13 @@ export default function WinDeclareApp() {
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['Changing Rooms', 'Washrooms', 'Parking']);
   const [gstEligible, setGstEligible] = useState<boolean>(true);
   const [isUploadingQr, setIsUploadingQr] = useState<boolean>(false);
+
+  // Automatically sync Contact Email input with logged-in user email
+  useEffect(() => {
+    if (currentUser?.email) {
+      setNewArenaEmail(currentUser.email);
+    }
+  }, [currentUser]);
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -952,18 +959,21 @@ export default function WinDeclareApp() {
       qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${encodeURIComponent(qrUrl)}`;
     }
 
+    const currentOwnerId = currentUser?.id || '';
+    const currentOwnerEmail = newArenaEmail.trim() || currentUser?.email || '';
+    const whatsappVal = newArenaWhatsappNumber.trim() || currentUser?.phone || '';
+
     const newTurf = {
       name: newArenaName,
       price: newArenaPrice,
       locationUrl: newArenaLocationUrl,
       qrCodeUrl: qrUrl,
       upiId: upi,
-      whatsappNumber: newArenaWhatsappNumber,
+      whatsappNumber: whatsappVal,
       sports: selectedSports,
       facilities: selectedAmenities
     };
 
-    const currentOwnerId = currentUser?.id || '';
     const created: Arena = {
       id: Date.now(),
       title: newArenaName,
@@ -978,17 +988,17 @@ export default function WinDeclareApp() {
       image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
       locationUrl: newArenaLocationUrl,
       plan: newArenaPlan,
-      ownerEmail: newArenaEmail || currentUser?.email,
+      ownerEmail: currentOwnerEmail,
       owner_id: currentOwnerId,
       ownerUpiId: upi,
       ownerQrCodeUrl: qrUrl,
       upiId: upi,
-      whatsappNumber: newArenaWhatsappNumber,
+      whatsappNumber: whatsappVal,
       status: 'pending',
       is_verified: false
     };
 
-    // Save/Insert Ground directly into Supabase database with status: 'pending' and owner_id
+    // Save/Insert Ground directly into Supabase database with status: 'pending', owner_id, owner_email, and whatsapp_number
     (async () => {
       try {
         const qrCodeUrl = newTurf.qrCodeUrl || '';
@@ -998,12 +1008,12 @@ export default function WinDeclareApp() {
           location_url: newTurf.locationUrl || '',
           qr_code_url: qrCodeUrl || '',
           upi_id: newTurf.upiId || '',
-          whatsapp_number: newTurf.whatsappNumber || '',
+          whatsapp_number: whatsappVal,
           sports: Array.isArray(newTurf.sports) ? newTurf.sports : [],
           facilities: Array.isArray(newTurf.facilities) ? newTurf.facilities : [],
           status: 'pending',
           owner_id: currentOwnerId,
-          owner_email: newArenaEmail || currentUser?.email || ''
+          owner_email: currentOwnerEmail
         };
 
         const { data, error } = await supabase.from('grounds').insert([payload]).select();
@@ -2360,7 +2370,7 @@ export default function WinDeclareApp() {
                                     required
                                     value={newArenaWhatsappNumber}
                                     onChange={(e) => setNewArenaWhatsappNumber(e.target.value)}
-                                    placeholder="+91 9505737751" 
+                                    placeholder="+91 9876543210" 
                                     className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono" 
                                   />
                                 </div>
@@ -2382,7 +2392,7 @@ export default function WinDeclareApp() {
                                   <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Contact Email</label>
                                   <input 
                                     type="email" 
-                                    value={newArenaEmail}
+                                    value={newArenaEmail || currentUser?.email || ''}
                                     onChange={(e) => setNewArenaEmail(e.target.value)}
                                     placeholder="owner@turf.in" 
                                     className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
