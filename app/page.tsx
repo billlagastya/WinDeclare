@@ -642,9 +642,12 @@ export default function WinDeclareApp() {
       }
 
       // 2. React state slot price override for active session
-      if (slotPrices[activeDateDay]?.[time] !== undefined && slotPrices[activeDateDay][time] !== '') {
-        return { time, price: Number(slotPrices[activeDateDay][time]) };
+      const priceValue = slotPrices[activeDateDay]?.[time];
+
+      if (priceValue !== undefined && priceValue !== null && String(priceValue) !== '') {
+        return { time, price: Number(priceValue) };
       }
+
 
       // 3. Baseline price_per_hour default
       return { time, price: slotBasePrice };
