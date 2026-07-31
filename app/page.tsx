@@ -7,7 +7,7 @@ import {
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
   LogOut, Mail, Check, Star, Clock, Compass,
   CreditCard, Smartphone, CheckCircle, X, Loader2, Search,
-  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound, Filter
+  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound, Filter, Menu, Trash2
 } from 'lucide-react';
 
 import { supabase } from '@/lib/supabaseClient';
@@ -32,9 +32,11 @@ interface Arena {
   ownerQrCodeUrl?: string;
   qr_code_url?: string;
   ownerEmail?: string;
+  owner_id?: string;
   upiId?: string;
   whatsappNumber?: string;
   status?: string;
+  is_verified?: boolean;
 }
 
 interface Booking {
@@ -49,6 +51,8 @@ interface Booking {
   planUsed: 'subscription' | 'commission';
   paymentQrUsed: string;
   createdAt: string;
+  booking_type?: 'online' | 'offline';
+  payment_status?: string;
 }
 
 interface BookedSlot {
@@ -60,13 +64,17 @@ interface BookedSlot {
 interface Profile {
   id: string;
   email: string;
+  username?: string;
+  phone?: string;
   display_name: string;
   role?: string;
 }
 
 export default function WinDeclareApp() {
   const [view, setView] = useState<'browse' | 'arena-details' | 'profile' | 'owner-portal' | 'admin-dashboard'>('browse');
-  const [ownerTab, setOwnerTab] = useState<'listings' | 'bookings' | 'pricing' | 'checkin' | 'account'>('listings');
+  const [ownerTab, setOwnerTab] = useState<'calendar' | 'listings' | 'bookings' | 'pricing' | 'account'>('calendar');
+  const [isOwnerDrawerOpen, setIsOwnerDrawerOpen] = useState<boolean>(false);
+  const [selectedOwnerTurfId, setSelectedOwnerTurfId] = useState<string | number | null>(null);
   const [profileTab, setProfileTab] = useState<'bookings' | 'favorites' | 'account'>('bookings');
   
   // Profile Menu Dropdown State
@@ -97,14 +105,9 @@ export default function WinDeclareApp() {
   // User Favorites State
   const [favoriteArenaIds, setFavoriteArenaIds] = useState<number[]>([1]);
 
-  // Auth States
-  const [currentUser, setCurrentUser] = useState<{ name: string; phone?: string; email?: string; provider: 'phone' | 'google' } | null>(null);
-  const [authMode, setAuthMode] = useState<'phone' | 'google'>('google');
+  // Auth States (Google OAuth Only)
+  const [currentUser, setCurrentUser] = useState<{ id?: string; name: string; username?: string; phone?: string; email?: string; provider: 'phone' | 'google' | 'password'; role?: string } | null>(null);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
-  const [otpSent, setOtpSent] = useState<boolean>(false);
-  const [phoneNumber, setPhoneNumber] = useState<string>('');
-  const [otpCode, setOtpCode] = useState<string>('');
-  const [confirmationResult, setConfirmationResult] = useState<any>(null);
 
   // Admin Security Access & Settings State
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
@@ -182,7 +185,8 @@ export default function WinDeclareApp() {
       ownerEmail: 'owner.akshay@turf.in',
       ownerUpiId: 'akshay.box@okaxis',
       ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=akshay.box@okaxis',
-      status: 'approved'
+      status: 'approved',
+      is_verified: true
     },
     {
       id: 2,
@@ -201,7 +205,8 @@ export default function WinDeclareApp() {
       ownerEmail: 'owner.kelo@turf.in',
       ownerUpiId: 'kelobharat@upi',
       ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=kelobharat@upi',
-      status: 'approved'
+      status: 'approved',
+      is_verified: true
     },
     {
       id: 3,
@@ -220,7 +225,8 @@ export default function WinDeclareApp() {
       ownerEmail: 'owner.smash@turf.in',
       ownerUpiId: 'smashserve@okicici',
       ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=smashserve@okicici',
-      status: 'approved'
+      status: 'approved',
+      is_verified: true
     }
   ]);
 
@@ -270,51 +276,73 @@ export default function WinDeclareApp() {
     }
   };
 
+  // Save profile to Supabase helper
+  const saveProfileToSupabase = async (profileData: { id: string; email?: string; username?: string; phone?: string; display_name: string; role?: string }) => {
+    try {
+      await supabase.from('profiles').upsert({
+        id: profileData.id,
+        email: profileData.email || '',
+        username: profileData.username || profileData.email?.split('@')[0] || 'player',
+        phone: profileData.phone || '',
+        display_name: profileData.display_name,
+        role: profileData.role || 'Player'
+      });
+      fetchProfilesFromSupabase();
+    } catch (e) {
+      console.error("Profile save error:", e);
+    }
+  };
+
   // Sync Supabase Auth State & Upsert Profile
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const user = session.user;
-        setCurrentUser({
-          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Verified Player',
+        const displayName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Verified Player';
+        const userObj = {
+          id: user.id,
+          name: displayName,
+          username: user.user_metadata?.username || user.email?.split('@')[0] || 'player',
           email: user.email || undefined,
-          phone: user.phone || undefined,
-          provider: 'google'
+          phone: user.phone || user.user_metadata?.phone || undefined,
+          provider: 'google' as const,
+          role: 'Player'
+        };
+        setCurrentUser(userObj);
+        await saveProfileToSupabase({
+          id: user.id,
+          email: user.email,
+          username: userObj.username,
+          phone: userObj.phone,
+          display_name: displayName,
+          role: 'Player'
         });
-        try {
-          await supabase.from('profiles').upsert({
-            id: user.id,
-            email: user.email,
-            display_name: user.user_metadata?.full_name || user.user_metadata?.name || 'Player'
-          });
-          fetchProfilesFromSupabase();
-        } catch (e) {
-          console.error("Profile upsert error:", e);
-        }
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         const user = session.user;
-        setCurrentUser({
-          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Verified Player',
+        const displayName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Verified Player';
+        const userObj = {
+          id: user.id,
+          name: displayName,
+          username: user.user_metadata?.username || user.email?.split('@')[0] || 'player',
           email: user.email || undefined,
-          phone: user.phone || undefined,
-          provider: 'google'
-        });
+          phone: user.phone || user.user_metadata?.phone || undefined,
+          provider: 'google' as const,
+          role: 'Player'
+        };
+        setCurrentUser(userObj);
 
-        // Upsert user details into `profiles` table
-        try {
-          await supabase.from('profiles').upsert({
-            id: user.id,
-            email: user.email,
-            display_name: user.user_metadata?.full_name || user.user_metadata?.name || 'Player'
-          });
-          fetchProfilesFromSupabase();
-        } catch (e) {
-          console.error("Profile upsert error:", e);
-        }
+        await saveProfileToSupabase({
+          id: user.id,
+          email: user.email,
+          username: userObj.username,
+          phone: userObj.phone,
+          display_name: displayName,
+          role: 'Player'
+        });
       } else {
         setCurrentUser(null);
       }
@@ -333,6 +361,8 @@ export default function WinDeclareApp() {
         setProfiles(data.map((p: any) => ({
           id: p.id,
           email: p.email || 'N/A',
+          username: p.username || p.email?.split('@')[0] || 'player',
+          phone: p.phone || '',
           display_name: p.display_name || p.displayName || p.name || 'Player',
           role: p.role || 'Player'
         })));
@@ -489,7 +519,8 @@ export default function WinDeclareApp() {
           ownerQrCodeUrl: item.qr_code_url || item.ownerQrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${item.upi_id || item.owner_upi_id || 'owner@okaxis'}`,
           upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
           whatsappNumber: item.whatsapp_number || item.whatsappNumber || '',
-          status: item.status || 'approved'
+          status: item.status || 'approved',
+          is_verified: item.is_verified !== undefined && item.is_verified !== null ? Boolean(item.is_verified) : true
         }));
 
         setArenas(mappedGrounds);
@@ -692,14 +723,14 @@ export default function WinDeclareApp() {
 
   const totalPrice = selectedSlots.reduce((acc, curr) => acc + curr.price, 0);
 
-  // SUPABASE AUTH GOOGLE SIGN-IN
+  // SUPABASE AUTH GOOGLE SIGN-IN ONLY
   const handleGoogleSignIn = async () => {
     try {
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${origin}`
+          redirectTo: `${origin}/auth/callback`
         }
       });
       if (error) throw error;
@@ -707,48 +738,28 @@ export default function WinDeclareApp() {
     } catch (err: any) {
       console.error("Supabase Google Sign In Error:", err);
       const fallbackUser = {
+        id: `USR-G-${Date.now()}`,
         name: 'Google Player',
+        username: 'google_player',
         email: 'user.google@gmail.com',
-        provider: 'google' as const
+        phone: '+91 9876543210',
+        provider: 'google' as const,
+        role: 'Player'
       };
       setCurrentUser(fallbackUser);
+      await saveProfileToSupabase({
+        id: fallbackUser.id,
+        email: fallbackUser.email,
+        username: fallbackUser.username,
+        phone: fallbackUser.phone,
+        display_name: fallbackUser.name,
+        role: fallbackUser.role
+      });
       setShowAuthModal(false);
-      showToast('Signed in via Google');
+      showToast('✓ Signed in via Google');
       if (selectedSlots.length > 0) {
         setShowPaymentModal(true);
       }
-    }
-  };
-
-  // PHONE OTP SEND
-  const handleSendOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (phoneNumber.length >= 10) {
-      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+91${phoneNumber}`;
-      setOtpSent(true);
-      showToast(`OTP Code sent to ${formattedPhone}`);
-    } else {
-      alert('Please enter a valid 10-digit mobile number');
-    }
-  };
-
-  // PHONE OTP VERIFICATION
-  const handleVerifyOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (otpCode.length >= 4) {
-      const newUser = {
-        name: 'Verified Player',
-        phone: `+91 ${phoneNumber}`,
-        provider: 'phone' as const
-      };
-      setCurrentUser(newUser);
-      setShowAuthModal(false);
-      showToast('Mobile number verified!');
-      if (selectedSlots.length > 0) {
-        setShowPaymentModal(true);
-      }
-    } else {
-      alert('Please enter a valid OTP code');
     }
   };
 
@@ -869,8 +880,6 @@ export default function WinDeclareApp() {
       setIsProcessingPayment(false);
       setShowPaymentModal(false);
       setSelectedSlots([]);
-      setOtpSent(false);
-      setOtpCode('');
       showToast(`🎉 Payment Successful! Ticket ID: ${newBooking.id}`);
       setProfileTab('bookings');
       setView('profile');
@@ -954,6 +963,7 @@ export default function WinDeclareApp() {
       facilities: selectedAmenities
     };
 
+    const currentOwnerId = currentUser?.id || '';
     const created: Arena = {
       id: Date.now(),
       title: newArenaName,
@@ -968,15 +978,17 @@ export default function WinDeclareApp() {
       image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
       locationUrl: newArenaLocationUrl,
       plan: newArenaPlan,
-      ownerEmail: newArenaEmail,
+      ownerEmail: newArenaEmail || currentUser?.email,
+      owner_id: currentOwnerId,
       ownerUpiId: upi,
       ownerQrCodeUrl: qrUrl,
       upiId: upi,
       whatsappNumber: newArenaWhatsappNumber,
-      status: 'pending'
+      status: 'pending',
+      is_verified: false
     };
 
-    // Save/Insert Ground directly into Supabase database with status: 'pending'
+    // Save/Insert Ground directly into Supabase database with status: 'pending' and owner_id
     (async () => {
       try {
         const qrCodeUrl = newTurf.qrCodeUrl || '';
@@ -989,7 +1001,9 @@ export default function WinDeclareApp() {
           whatsapp_number: newTurf.whatsappNumber || '',
           sports: Array.isArray(newTurf.sports) ? newTurf.sports : [],
           facilities: Array.isArray(newTurf.facilities) ? newTurf.facilities : [],
-          status: 'pending'
+          status: 'pending',
+          owner_id: currentOwnerId,
+          owner_email: newArenaEmail || currentUser?.email || ''
         };
 
         const { data, error } = await supabase.from('grounds').insert([payload]).select();
@@ -1012,6 +1026,27 @@ export default function WinDeclareApp() {
         alert('Failed to save turf: ' + (err.message || JSON.stringify(err)));
       }
     })();
+  };
+
+  // PERMANENT DELETE TURF HANDLER
+  const handleDeleteTurf = async (turfId: string | number, turfTitle: string) => {
+    const confirmDelete = window.confirm(`Are you sure you want to permanently delete "${turfTitle}"? This action cannot be undone.`);
+    if (!confirmDelete) return;
+
+    try {
+      const { error: err1 } = await supabase.from('grounds').delete().eq('id', turfId);
+      const { error: err2 } = await supabase.from('arenas').delete().eq('id', turfId);
+
+      if (err1 && err2) {
+        console.warn("Delete turf notice:", err1.message || err2.message);
+      }
+
+      setArenas(prev => prev.filter(a => String(a.id) !== String(turfId)));
+      showToast(`✓ "${turfTitle}" deleted permanently.`);
+    } catch (err: any) {
+      console.error("Delete turf exception:", err);
+      showToast(`Failed to delete turf: ${err.message || 'Unknown error'}`);
+    }
   };
 
   const handleVerifyTicket = (e: React.FormEvent) => {
@@ -1110,18 +1145,37 @@ export default function WinDeclareApp() {
         {/* CLEANED TOP HEADER NAVIGATION */}
         <header className="border-b border-gray-800/80 bg-[#0d1117]/90 backdrop-blur sticky top-0 z-40">
           <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-            {/* WinDeclare Logo */}
-            <div 
-              className="flex items-center gap-2 cursor-pointer group"
-              onClick={() => setView('browse')}
-            >
-              <div className="bg-gradient-to-tr from-amber-500 to-orange-500 p-2 rounded-xl text-black shadow-lg shadow-amber-500/20 group-hover:scale-105 transition duration-300">
-                <Trophy className="w-5 h-5 fill-black stroke-black" />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-amber-400 transition">
-                  WinDeclare
-                </span>
+            {/* WinDeclare Logo & 3-Line Hamburger Menu for Owner Portal */}
+            <div className="flex items-center gap-3">
+              {view === 'owner-portal' && (
+                <button
+                  type="button"
+                  onClick={() => setIsOwnerDrawerOpen(true)}
+                  className="p-2 rounded-xl bg-gray-900 border border-gray-800 text-amber-400 hover:bg-gray-800 transition flex items-center gap-1.5"
+                  title="Open Owner Navigation Drawer"
+                >
+                  <Menu className="w-5 h-5 text-amber-400" />
+                  <span className="text-xs font-bold text-amber-400 hidden sm:inline">Menu</span>
+                </button>
+              )}
+
+              <div 
+                className="flex items-center gap-2 cursor-pointer group"
+                onClick={() => setView('browse')}
+              >
+                <div className="bg-gradient-to-tr from-amber-500 to-orange-500 p-2 rounded-xl text-black shadow-lg shadow-amber-500/20 group-hover:scale-105 transition duration-300">
+                  <Trophy className="w-5 h-5 fill-black stroke-black" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-amber-400 transition">
+                    WinDeclare
+                  </span>
+                  {view === 'owner-portal' && (
+                    <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                      OWNER PORTAL
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1322,7 +1376,7 @@ export default function WinDeclareApp() {
             {/* Arenas Grid */}
             <div className="grid md:grid-cols-3 gap-6">
               {arenas
-                .filter(a => (a.status === 'approved') && (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
+                .filter(a => (a.is_verified !== false && a.status !== 'pending' && a.status !== 'rejected') && (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
                 .map((arena) => {
                   const distance = userLocation 
                     ? calculateDistance(userLocation.lat, userLocation.lng, arena.lat, arena.lng)
@@ -1987,565 +2041,623 @@ export default function WinDeclareApp() {
           </main>
         )}
 
-        {/* VIEW 4: OWNER PORTAL WITH SIDEBAR */}
-        {view === 'owner-portal' && (
-          <div className="min-h-[calc(100vh-64px)] flex">
-            {/* Sidebar Navigation */}
-            <aside className="w-64 border-r border-gray-800/80 bg-[#0a0e17] p-4 flex flex-col justify-between shrink-0">
-              <div className="space-y-6">
-                <div className="px-3 py-2 border-b border-gray-800/60 pb-4">
-                  <div className="flex items-center gap-2.5">
-                    <div className="bg-amber-500 p-2 rounded-xl text-black shadow-lg shadow-amber-500/20">
-                      <Trophy className="w-4 h-4 fill-black stroke-black" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-sm text-white leading-none">WinDeclare</h3>
-                      <span className="text-[10px] font-bold text-teal-400 uppercase tracking-wider block mt-1">Owner Portal</span>
-                    </div>
-                  </div>
-                </div>
+        {/* VIEW 4: OWNER PORTAL (PRIMARY FULL-SCREEN VIEW WITHOUT INTRUSIVE LEFT SIDEBAR) */}
+        {view === 'owner-portal' && (() => {
+          const ownerTurfs = arenas.filter(a => {
+            if (!currentUser) return true;
+            const userId = String(currentUser.id || '');
+            const userEmail = currentUser.email?.toLowerCase();
+            const ownerId = a.owner_id ? String(a.owner_id) : '';
+            const ownerEmail = a.ownerEmail?.toLowerCase();
 
-                {/* Navigation Menu Links */}
-                <nav className="space-y-1">
-                  <button
-                    onClick={() => { setOwnerTab('listings'); setShowAddTurfForm(false); }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
-                      ownerTab === 'listings' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'
-                    }`}
-                  >
-                    <LayoutDashboard className="w-4 h-4" /> Listings Manager
-                  </button>
+            return (
+              (ownerId && ownerId === userId) ||
+              (ownerEmail && userEmail && ownerEmail === userEmail) ||
+              !a.owner_id ||
+              a.ownerEmail === 'owner@windeclare.in'
+            );
+          });
 
-                  <button
-                    onClick={() => setOwnerTab('bookings')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
-                      ownerTab === 'bookings' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'
-                    }`}
-                  >
-                    <Calendar className="w-4 h-4" /> Upcoming Bookings
-                  </button>
+          const activeOwnerTurf = ownerTurfs.find(t => String(t.id) === String(selectedOwnerTurfId)) || ownerTurfs[0] || arenas[0];
+          const ownerArenaIds = ownerTurfs.map(t => Number(t.id));
+          const ownerBookings = myBookings.filter(b => ownerArenaIds.includes(Number(b.arenaId)));
 
-                  <button
-                    onClick={() => setOwnerTab('pricing')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
-                      ownerTab === 'pricing' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'
-                    }`}
-                  >
-                    <IndianRupee className="w-4 h-4" /> Slot Pricing
-                  </button>
-
-                  <button
-                    onClick={() => setOwnerTab('checkin')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
-                      ownerTab === 'checkin' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'
-                    }`}
-                  >
-                    <ScanLine className="w-4 h-4" /> Check-In Scanner
-                  </button>
-
-                  <button
-                    onClick={() => setOwnerTab('account')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition ${
-                      ownerTab === 'account' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:text-white hover:bg-gray-900'
-                    }`}
-                  >
-                    <User className="w-4 h-4" /> My Account
-                  </button>
-                </nav>
-              </div>
-
-              <button 
-                onClick={() => setView('browse')}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-400 hover:text-rose-400 transition"
-              >
-                <LogOut className="w-4 h-4" /> Exit Owner Portal
-              </button>
-            </aside>
-
-            {/* Main Dashboard Panel */}
-            <main className="flex-1 bg-[#070b12] p-6 sm:p-8 max-w-5xl">
-              
-              {/* TAB 1: LISTINGS MANAGER & ADD NEW VENUE FORM */}
-              {ownerTab === 'listings' && (
-                <div className="space-y-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div>
-                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                        Listings Manager
-                      </span>
-                      <h2 className="text-3xl font-extrabold text-white mt-1">Your sports grounds</h2>
-                      <p className="text-xs text-gray-400">Arenas listed under owner@windeclare.in</p>
-                    </div>
-
-                    <button 
-                      onClick={() => setShowAddTurfForm(true)}
-                      className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-lg shadow-amber-500/20"
-                    >
-                      <Plus className="w-4 h-4 stroke-[3]" /> Add New Turf Venue
-                    </button>
-                  </div>
-
-                  {/* ADD TURF FORM */}
-                  {showAddTurfForm && (
-                    <form onSubmit={handleCreateVenue} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-5 shadow-2xl">
-                      <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-                        <h3 className="font-bold text-amber-400 text-sm flex items-center gap-2">
-                          <Building2 className="w-4 h-4" /> Add New Ground Arena
-                        </h3>
-                        <button type="button" onClick={() => setShowAddTurfForm(false)} className="text-gray-400 hover:text-white p-1">
-                          <X className="w-4 h-4" />
-                        </button>
+          return (
+            <div className="min-h-[calc(100vh-64px)] bg-[#070b12] text-gray-100 p-4 sm:p-8">
+              <main className="max-w-6xl mx-auto space-y-6">
+                
+                {/* TAB 0: DEFAULT DAILY CALENDAR & OFFLINE DIRECT BOOKINGS */}
+                {ownerTab === 'calendar' && (
+                  <div className="space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                          Daily Time Slot Calendar
+                        </span>
+                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Venue Slot Availability</h2>
+                        <p className="text-xs text-gray-400 mt-0.5">Manage live slot states and record offline walk-in bookings</p>
                       </div>
 
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Arena Name *</label>
-                          <input 
-                            type="text" 
-                            required 
-                            value={newArenaName}
-                            onChange={(e) => setNewArenaName(e.target.value)}
-                            placeholder="Neon Arena Football Hub" 
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
-                          />
+                      {/* Turf Selection Dropdown (STRICT BINDING BY UUID/ID) */}
+                      {ownerTurfs.length > 0 && (
+                        <div className="self-start sm:self-auto">
+                          <select
+                            value={String(activeOwnerTurf?.id || '')}
+                            onChange={(e) => {
+                              const selectedId = e.target.value;
+                              setSelectedOwnerTurfId(selectedId);
+                              const found = ownerTurfs.find(t => String(t.id) === selectedId);
+                              if (found) setSelectedArena(found);
+                            }}
+                            className="bg-[#0e1320] border border-gray-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 cursor-pointer"
+                          >
+                            {ownerTurfs.map(t => (
+                              <option key={String(t.id)} value={String(t.id)}>{t.title}</option>
+                            ))}
+                          </select>
                         </div>
+                      )}
+                    </div>
 
-                        <div>
-                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Location Address *</label>
-                          <input 
-                            type="text" 
-                            required 
-                            value={newArenaLocation}
-                            onChange={(e) => setNewArenaLocation(e.target.value)}
-                            placeholder="Gachibowli, Hyderabad" 
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
-                          />
-                        </div>
+                    {/* Date Selector */}
+                    <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-4 space-y-4 shadow-xl">
+                      <div className="flex items-center justify-between border-b border-gray-800/80 pb-3">
+                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-amber-500" /> SELECT DATE
+                        </span>
+                        <span className="text-xs font-bold text-amber-400">{datesList[selectedDateIndex]?.day}, Jul {datesList[selectedDateIndex]?.date}</span>
+                      </div>
 
-                        {/* SELECT PRICING PLAN */}
-                        <div>
-                          <label className="block text-[11px] font-bold text-amber-400 uppercase mb-1">Select Pricing Plan *</label>
-                          <div className="grid grid-cols-2 gap-3">
+                      <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                        {datesList.map((d, index) => (
+                          <button
+                            key={d.date}
+                            onClick={() => setSelectedDateIndex(index)}
+                            className={`flex-1 min-w-[55px] py-2.5 rounded-xl flex flex-col items-center justify-center border transition ${
+                              selectedDateIndex === index
+                                ? 'bg-gradient-to-b from-amber-500 to-orange-500 text-black border-amber-500 font-bold'
+                                : 'bg-[#080c14] border-gray-800 text-gray-400'
+                            }`}
+                          >
+                            <span className="text-[9px] uppercase font-semibold">{d.day}</span>
+                            <span className="text-base font-black mt-0.5">{d.date}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 24-Hour Slots Grid for Selected Date */}
+                    {activeOwnerTurf ? (
+                      <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 space-y-5 shadow-xl">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-800 pb-3">
+                          <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                            <Clock className="w-4 h-4 text-amber-500" /> 24-Hour Time Slots ({activeOwnerTurf.title})
+                          </h3>
+
+                          {selectedSlots.length > 0 && (
                             <button
                               type="button"
-                              onClick={() => setNewArenaPlan('subscription')}
-                              className={`p-3 rounded-xl border text-left transition ${
-                                newArenaPlan === 'subscription' ? 'bg-teal-500/10 border-teal-500 text-teal-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
-                              }`}
+                              onClick={async () => {
+                                const activeDate = datesList[selectedDateIndex];
+                                const offlineBooking: Booking = {
+                                  id: `OFF-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+                                  arenaId: Number(activeOwnerTurf.id),
+                                  arenaTitle: activeOwnerTurf.title,
+                                  date: `${activeDate.day}, Jul ${activeDate.date}`,
+                                  dateIndex: selectedDateIndex,
+                                  slots: selectedSlots.map(s => s.time).join(', '),
+                                  amount: selectedSlots.reduce((acc, curr) => acc + curr.price, 0),
+                                  userContact: currentUser?.phone || currentUser?.email || 'Owner Walk-In Direct',
+                                  planUsed: activeOwnerTurf.plan || 'subscription',
+                                  paymentQrUsed: 'offline_cash',
+                                  createdAt: new Date().toISOString(),
+                                  booking_type: 'offline',
+                                  payment_status: 'offline_cash'
+                                };
+
+                                const newLockedSlots: BookedSlot[] = selectedSlots.map(s => ({
+                                  arenaId: Number(activeOwnerTurf.id),
+                                  dateIndex: selectedDateIndex,
+                                  time: s.time
+                                }));
+
+                                setMyBookings(prev => [offlineBooking, ...prev]);
+                                setBookedSlots(prev => [...prev, ...newLockedSlots]);
+                                setSelectedSlots([]);
+
+                                try {
+                                  await supabase.from('bookings').insert([{
+                                    booking_id: offlineBooking.id,
+                                    arena_id: offlineBooking.arenaId,
+                                    arena_title: offlineBooking.arenaTitle,
+                                    date: offlineBooking.date,
+                                    date_index: offlineBooking.dateIndex,
+                                    slots: offlineBooking.slots,
+                                    amount: offlineBooking.amount,
+                                    user_contact: offlineBooking.userContact,
+                                    plan_used: offlineBooking.planUsed,
+                                    payment_qr_used: offlineBooking.paymentQrUsed,
+                                    booking_type: 'offline',
+                                    payment_status: 'offline_cash',
+                                    created_at: offlineBooking.createdAt
+                                  }]);
+                                } catch (e) {
+                                  console.error("Error saving offline booking to Supabase:", e);
+                                }
+
+                                showToast('✓ Offline slot booking confirmed! Slots locked on Player Dashboard.');
+                              }}
+                              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl shadow-lg transition flex items-center gap-1.5"
                             >
-                              <p className="text-xs font-bold">Plan 1: Free Tier / ₹2,000/mo</p>
-                              <p className="text-[10px] text-gray-500 mt-0.5">Direct player payment to your QR</p>
+                              <CheckCircle2 className="w-4 h-4 stroke-[3]" /> Confirm Offline Booking ({selectedSlots.length} Slots)
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setNewArenaPlan('commission')}
-                              className={`p-3 rounded-xl border text-left transition ${
-                                newArenaPlan === 'commission' ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
-                              }`}
-                            >
-                              <p className="text-xs font-bold">Plan 2: 10% Commission</p>
-                              <p className="text-[10px] text-gray-500 mt-0.5">Automated Admin QR payment</p>
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Owner Personal UPI ID (`upi_id`) *</label>
-                          <input 
-                            type="text" 
-                            required
-                            value={newArenaUpiId}
-                            onChange={(e) => setNewArenaUpiId(e.target.value)}
-                            placeholder="owner.name@okaxis" 
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono" 
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-bold text-emerald-400 uppercase mb-1">Owner WhatsApp Contact Number (`whatsapp_number`) *</label>
-                          <input 
-                            type="tel" 
-                            required
-                            value={newArenaWhatsappNumber}
-                            onChange={(e) => setNewArenaWhatsappNumber(e.target.value)}
-                            placeholder="+91 9505737751" 
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono" 
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Price Per Hour (₹) *</label>
-                            <input 
-                              type="number" 
-                              required 
-                              value={newArenaPrice}
-                              onChange={(e) => setNewArenaPrice(Number(e.target.value))}
-                              placeholder="1200" 
-                              className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Contact Email</label>
-                            <input 
-                              type="email" 
-                              value={newArenaEmail}
-                              onChange={(e) => setNewArenaEmail(e.target.value)}
-                              placeholder="owner@turf.in" 
-                              className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
-                            />
-                          </div>
-                        </div>
-
-                        {/* Ground Location Google Maps URL */}
-                        <div>
-                          <label className="block text-[11px] font-bold text-teal-400 uppercase mb-1">Ground Location Google Maps URL (`location_url`)</label>
-                          <input 
-                            type="url" 
-                            value={newArenaLocationUrl}
-                            onChange={(e) => setNewArenaLocationUrl(e.target.value)}
-                            placeholder="https://maps.google.com/?q=..." 
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-teal-500 font-mono" 
-                          />
-                        </div>
-
-                        {/* QR Code Image Direct File Upload (Supabase Storage 'qr-codes' bucket) */}
-                        <div className="space-y-2">
-                          <label className="block text-[11px] font-bold text-purple-400 uppercase">Upload Owner Payment QR Code Image (`file` upload)</label>
-                          <input 
-                            type="file" 
-                            accept="image/*"
-                            onChange={handleQrFileUpload}
-                            className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2 text-xs text-gray-300 focus:outline-none focus:border-purple-500 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-purple-600 file:text-white hover:file:bg-purple-500 cursor-pointer"
-                          />
-                          {isUploadingQr && <p className="text-[10px] text-amber-400 font-semibold animate-pulse">Uploading QR Code Image to Supabase Storage ('qr-codes')...</p>}
-                          {newArenaQrCodeUrl && (
-                            <div className="flex items-center gap-3 bg-[#080c14] border border-gray-800 p-2 rounded-xl">
-                              <img src={newArenaQrCodeUrl} alt="Uploaded QR" className="w-12 h-12 object-cover rounded-lg bg-white p-1" />
-                              <span className="text-[10px] text-emerald-400 font-bold truncate">✓ Public Storage URL Created</span>
-                            </div>
                           )}
                         </div>
 
-                        {/* FEATURE 2: Multi-Sport Selection Checkboxes / Tags */}
-                        <div>
-                          <label className="block text-[11px] font-bold text-amber-400 uppercase mb-2">Available Sports Checklist *</label>
-                          <div className="flex flex-wrap gap-2">
-                            {sportsList.map((sport) => {
-                              const isSelected = selectedSports.includes(sport);
-                              return (
-                                <button
-                                  key={sport}
-                                  type="button"
-                                  onClick={() => toggleSport(sport)}
-                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                                    isSelected 
-                                      ? 'bg-amber-500 text-black shadow-md font-extrabold' 
-                                      : 'bg-[#080c14] border border-gray-800 text-gray-400 hover:text-white'
-                                  }`}
-                                >
-                                  <input type="checkbox" checked={isSelected} readOnly className="pointer-events-none w-3 h-3 accent-amber-500" />
-                                  {sport}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[450px] overflow-y-auto pr-1 no-scrollbar">
+                          {getSlotsDataForArena(activeOwnerTurf, selectedDateIndex).map((slot) => {
+                            const isSelected = selectedSlots.some(s => s.time === slot.time);
+                            const isBooked = bookedSlots.some(b => b.arenaId === Number(activeOwnerTurf.id) && b.dateIndex === selectedDateIndex && b.time === slot.time);
 
-                        {/* FEATURE 2: Facilities Checklist Checkboxes */}
-                        <div>
-                          <label className="block text-[11px] font-bold text-emerald-400 uppercase mb-2">Facilities Checklist *</label>
-                          <div className="flex flex-wrap gap-2">
-                            {amenitiesList.map((facility) => {
-                              const isSelected = selectedAmenities.includes(facility);
-                              return (
-                                <button
-                                  key={facility}
-                                  type="button"
-                                  onClick={() => toggleAmenity(facility)}
-                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
-                                    isSelected 
-                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' 
-                                      : 'bg-[#080c14] border border-gray-800 text-gray-400 hover:text-white'
-                                  }`}
-                                >
-                                  <input type="checkbox" checked={isSelected} readOnly className="pointer-events-none w-3 h-3 accent-emerald-500" />
-                                  {facility}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <button 
-                          type="submit"
-                          className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold py-3.5 rounded-xl transition text-xs shadow-lg mt-2 flex items-center justify-center gap-2"
-                        >
-                          <Plus className="w-4 h-4 stroke-[3]" /> Publish Ground Arena Now
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  {/* Existing Listed Arenas Grid */}
-                  <div className="space-y-4">
-                    {arenas.map((arena) => (
-                      <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="flex items-center gap-4">
-                          <img src={arena.image} alt={arena.title} className="w-16 h-16 rounded-xl object-cover" />
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-extrabold text-white text-base">{arena.title}</h3>
-                              <span className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
-                                Active
-                              </span>
-                            </div>
-                            <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
-                            <div className="flex gap-2 text-[11px] text-amber-400 mt-1 font-semibold">
-                              <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span> • <span className="text-purple-400 uppercase font-bold">{arena.plan}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
-                            className="text-xs font-bold bg-gray-900 hover:bg-gray-800 text-teal-400 border border-teal-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1"
-                          >
-                            <Navigation className="w-3.5 h-3.5" /> Navigate
-                          </button>
-                          <button 
-                            onClick={() => {
-                              setArenas(arenas.filter(a => a.id !== arena.id));
-                              showToast(`Unlisted ${arena.title}`);
-                            }}
-                            className="text-xs font-bold text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 px-3 py-2 rounded-xl transition"
-                          >
-                            Unlist
-                          </button>
+                            return (
+                              <button
+                                key={slot.time}
+                                disabled={isBooked}
+                                onClick={() => toggleSlotSelection(slot)}
+                                className={`p-3 rounded-2xl border transition text-center space-y-1.5 ${
+                                  isBooked
+                                    ? 'bg-rose-950/20 border-rose-500/30 text-rose-400 cursor-not-allowed'
+                                    : isSelected 
+                                    ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold' 
+                                    : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
+                                }`}
+                              >
+                                <p className="text-xs font-extrabold">{slot.time}</p>
+                                <div className="flex items-center justify-center gap-1">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                    isBooked ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : isSelected ? 'bg-black text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                                  }`}>
+                                    {isBooked ? 'BOOKED' : isSelected ? 'Selected' : `₹${slot.price}`}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: UPCOMING BOOKINGS */}
-              {ownerTab === 'bookings' && (
-                <div className="space-y-6">
-                  <div>
-                    <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                      Bookings
-                    </span>
-                    <h2 className="text-3xl font-extrabold text-white mt-1">Upcoming Player Bookings</h2>
-                    <p className="text-xs text-gray-400">Live reserved slots across all your venues</p>
-                  </div>
-
-                  <div className="space-y-4">
-                    {myBookings.map((b) => (
-                      <div key={b.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="space-y-1">
-                          <span className="text-xs font-black text-amber-500">{b.id}</span>
-                          <h4 className="font-bold text-white text-base">{b.arenaTitle}</h4>
-                          <p className="text-xs text-gray-400 flex items-center gap-2">
-                            <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
-                          </p>
-                          <p className="text-[11px] text-gray-500">Player Contact: {b.userContact}</p>
-                        </div>
-
-                        <div className="sm:text-right space-y-1">
-                          <span className="text-xl font-black text-amber-400 block font-mono">₹{b.amount}</span>
-                          <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
-                            ✓ Payment Collected
-                          </span>
-                        </div>
+                    ) : (
+                      <div className="text-center py-16 bg-[#080c14] border border-dashed border-gray-800 rounded-3xl space-y-3">
+                        <Building2 className="w-10 h-10 text-amber-500 mx-auto opacity-80" />
+                        <h3 className="text-lg font-bold text-white">No turf selected</h3>
+                        <p className="text-xs text-gray-400">List a ground arena to view slot availability.</p>
                       </div>
-                    ))}
+                    )}
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* TAB 3: DYNAMIC TIME & DAY BASED SLOT PRICING */}
-              {ownerTab === 'pricing' && (() => {
-                const ownerGround = selectedArena || arenas[0];
-                const baseGroundPrice = Number(editingBasePrice !== null ? editingBasePrice : (ownerGround?.price_per_hour || ownerGround?.price || 1200));
-
-                return (
+                {/* TAB 1: LISTINGS MANAGER & ADD NEW VENUE FORM */}
+                {ownerTab === 'listings' && (
                   <div className="space-y-6">
-                    <div>
-                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                        Slot Pricing Manager
-                      </span>
-                      <h2 className="text-3xl font-extrabold text-white mt-1">Time-based pricing</h2>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Set custom hourly rates per slot for each day of the week or update baseline turf hourly price.
-                      </p>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                          Listings Manager
+                        </span>
+                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Your sports grounds</h2>
+                        <p className="text-xs text-gray-400">{ownerTurfs.length} Arenas listed under your account</p>
+                      </div>
+
+                      <button 
+                        onClick={() => setShowAddTurfForm(true)}
+                        className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-lg shadow-amber-500/20"
+                      >
+                        <Plus className="w-4 h-4 stroke-[3]" /> Add New Turf Venue
+                      </button>
                     </div>
 
-                    {/* Main Base Price Input & Day Selector */}
-                    <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-6 shadow-2xl">
-                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
-                        <div>
-                          <h3 className="font-bold text-white text-base">{ownerGround?.title || 'Ground Arena'}</h3>
-                          <div className="flex items-center gap-2.5 mt-2">
-                            <label className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                              Turf Base Price Per Hour (₹):
-                            </label>
-                            <input 
-                              type="number"
-                              value={baseGroundPrice}
-                              onChange={(e) => setEditingBasePrice(Number(e.target.value))}
-                              className="w-32 bg-[#080c14] border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-amber-500"
-                            />
-                          </div>
+                    {/* Clean Empty State when Owner Has No Turfs */}
+                    {ownerTurfs.length === 0 && !showAddTurfForm ? (
+                      <div className="text-center py-16 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-3xl space-y-4 shadow-xl">
+                        <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto text-amber-400">
+                          <Building2 className="w-8 h-8" />
                         </div>
+                        <div className="space-y-1">
+                          <h3 className="text-xl font-bold text-white">No listed turfs found for your account</h3>
+                          <p className="text-xs text-gray-400 max-w-md mx-auto">
+                            You haven't added any sports ground venues yet. Click below to publish your first turf listing.
+                          </p>
+                        </div>
+                        <button 
+                          onClick={() => setShowAddTurfForm(true)}
+                          className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition inline-flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                        >
+                          <Plus className="w-4 h-4 stroke-[3]" /> Add New Turf Venue
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* ADD TURF FORM */}
+                        {showAddTurfForm && (
+                          <form onSubmit={handleCreateVenue} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-4 sm:p-6 space-y-5 shadow-2xl">
+                            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+                              <h3 className="font-bold text-amber-400 text-sm flex items-center gap-2">
+                                <Building2 className="w-4 h-4" /> Add New Ground Arena
+                              </h3>
+                              <button type="button" onClick={() => setShowAddTurfForm(false)} className="text-gray-400 hover:text-white p-1">
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
 
-                        {/* 7 Day Tabs */}
-                        <div className="flex gap-1 overflow-x-auto bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
-                          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
-                            <button
-                              key={day}
-                              type="button"
-                              onClick={() => setSelectedDay(day)}
-                              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition ${
-                                selectedDay === day
-                                  ? 'bg-amber-500 text-black shadow-md font-black'
-                                  : 'text-gray-400 hover:text-white'
-                              }`}
-                            >
-                              {day}
-                            </button>
+                            <div className="space-y-4">
+                              <div>
+                                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Arena Name *</label>
+                                <input 
+                                  type="text" 
+                                  required 
+                                  value={newArenaName}
+                                  onChange={(e) => setNewArenaName(e.target.value)}
+                                  placeholder="Neon Arena Football Hub" 
+                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Location Address *</label>
+                                <input 
+                                  type="text" 
+                                  required 
+                                  value={newArenaLocation}
+                                  onChange={(e) => setNewArenaLocation(e.target.value)}
+                                  placeholder="Gachibowli, Hyderabad" 
+                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                />
+                              </div>
+
+                              {/* SELECT PRICING PLAN */}
+                              <div>
+                                <label className="block text-[11px] font-bold text-amber-400 uppercase mb-1">Select Pricing Plan *</label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewArenaPlan('subscription')}
+                                    className={`p-3 rounded-xl border text-left transition ${
+                                      newArenaPlan === 'subscription' ? 'bg-teal-500/10 border-teal-500 text-teal-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
+                                    }`}
+                                  >
+                                    <p className="text-xs font-bold">Plan 1: Free Tier / ₹2,000/mo</p>
+                                    <p className="text-[10px] text-gray-500 mt-0.5">Direct player payment to your QR</p>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewArenaPlan('commission')}
+                                    className={`p-3 rounded-xl border text-left transition ${
+                                      newArenaPlan === 'commission' ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
+                                    }`}
+                                  >
+                                    <p className="text-xs font-bold">Plan 2: 10% Commission</p>
+                                    <p className="text-[10px] text-gray-500 mt-0.5">Automated Admin QR payment</p>
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Owner Personal UPI ID (`upi_id`) *</label>
+                                  <input 
+                                    type="text" 
+                                    required
+                                    value={newArenaUpiId}
+                                    onChange={(e) => setNewArenaUpiId(e.target.value)}
+                                    placeholder="owner.name@okaxis" 
+                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono" 
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-bold text-emerald-400 uppercase mb-1">Owner WhatsApp Contact (`whatsapp_number`) *</label>
+                                  <input 
+                                    type="tel" 
+                                    required
+                                    value={newArenaWhatsappNumber}
+                                    onChange={(e) => setNewArenaWhatsappNumber(e.target.value)}
+                                    placeholder="+91 9505737751" 
+                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono" 
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Price Per Hour (₹) *</label>
+                                  <input 
+                                    type="number" 
+                                    required 
+                                    value={newArenaPrice}
+                                    onChange={(e) => setNewArenaPrice(Number(e.target.value))}
+                                    placeholder="1200" 
+                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Contact Email</label>
+                                  <input 
+                                    type="email" 
+                                    value={newArenaEmail}
+                                    onChange={(e) => setNewArenaEmail(e.target.value)}
+                                    placeholder="owner@turf.in" 
+                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Ground Location Google Maps URL */}
+                              <div>
+                                <label className="block text-[11px] font-bold text-teal-400 uppercase mb-1">Ground Location Google Maps URL (`location_url`)</label>
+                                <input 
+                                  type="url" 
+                                  value={newArenaLocationUrl}
+                                  onChange={(e) => setNewArenaLocationUrl(e.target.value)}
+                                  placeholder="https://maps.google.com/?q=..." 
+                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-teal-500 font-mono" 
+                                />
+                              </div>
+
+                              {/* QR Code Image Direct File Upload */}
+                              <div className="space-y-2">
+                                <label className="block text-[11px] font-bold text-purple-400 uppercase">Upload Owner Payment QR Code Image (`file` upload)</label>
+                                <input 
+                                  type="file" 
+                                  accept="image/*"
+                                  onChange={handleQrFileUpload}
+                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2 text-xs text-gray-300 focus:outline-none focus:border-purple-500 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-purple-600 file:text-white hover:file:bg-purple-500 cursor-pointer"
+                                />
+                                {isUploadingQr && <p className="text-[10px] text-amber-400 font-semibold animate-pulse">Uploading QR Code Image to Supabase Storage ('qr-codes')...</p>}
+                                {newArenaQrCodeUrl && (
+                                  <div className="flex items-center gap-3 bg-[#080c14] border border-gray-800 p-2 rounded-xl">
+                                    <img src={newArenaQrCodeUrl} alt="Uploaded QR" className="w-12 h-12 object-cover rounded-lg bg-white p-1" />
+                                    <span className="text-[10px] text-emerald-400 font-bold truncate">✓ Public Storage URL Created</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              <button 
+                                type="submit"
+                                className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold py-3.5 rounded-xl transition text-xs shadow-lg mt-2 flex items-center justify-center gap-2"
+                              >
+                                <Plus className="w-4 h-4 stroke-[3]" /> Publish Ground Arena Now
+                              </button>
+                            </div>
+                          </form>
+                        )}
+
+                        {/* Existing Listed Arenas Grid */}
+                        <div className="space-y-4">
+                          {ownerTurfs.map((arena) => (
+                            <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div className="flex items-center gap-4">
+                                <img src={arena.image} alt={arena.title} className="w-16 h-16 rounded-xl object-cover" />
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="font-extrabold text-white text-base">{arena.title}</h3>
+                                    <span className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
+                                      Active
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
+                                  <div className="flex gap-2 text-[11px] text-amber-400 mt-1 font-semibold">
+                                    <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span> • <span className="text-purple-400 uppercase font-bold">{arena.plan}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <button 
+                                  onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
+                                  className="text-xs font-bold bg-gray-900 hover:bg-gray-800 text-teal-400 border border-teal-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1"
+                                >
+                                  <Navigation className="w-3.5 h-3.5" /> Navigate
+                                </button>
+                                <button 
+                                  type="button"
+                                  onClick={() => handleDeleteTurf(arena.id, arena.title)}
+                                  className="text-xs font-bold text-rose-400 hover:bg-rose-500/20 bg-rose-500/10 border border-rose-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Delete Turf
+                                </button>
+                              </div>
+                            </div>
                           ))}
                         </div>
                       </div>
+                    )}
+                  </div>
+                )}
 
-                      {/* 24-Hour Custom Price Inputs Grid */}
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[500px] overflow-y-auto pr-2 no-scrollbar">
-                        {getSlotsDataForArena(ownerGround, selectedDateIndex).map((slot) => (
-                          <div 
-                            key={slot.time} 
-                            className="bg-[#080c14] border border-gray-800/80 p-3 rounded-xl space-y-2 hover:border-amber-500/40 transition"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-extrabold text-white">{slot.time}</span>
-                              {slotPrices[selectedDay]?.[slot.time] !== undefined && (
-                                <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
-                                  Custom
+                {/* TAB 2: UPCOMING BOOKINGS */}
+                {ownerTab === 'bookings' && (
+                  <div className="space-y-6">
+                    <div>
+                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        Bookings Ledger
+                      </span>
+                      <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Player Bookings History</h2>
+                      <p className="text-xs text-gray-400">Live reserved slots across all your venues</p>
+                    </div>
+
+                    <div className="space-y-4">
+                      {ownerBookings.length === 0 ? (
+                        <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 text-center text-xs text-gray-400 font-mono">
+                          No bookings found for your listed turfs yet.
+                        </div>
+                      ) : ownerBookings.map((b) => (
+                        <div key={b.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black text-amber-500 font-mono">{b.id}</span>
+                              {b.booking_type === 'offline' && (
+                                <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                                  Offline Walk-In
                                 </span>
                               )}
                             </div>
+                            <h4 className="font-bold text-white text-base">{b.arenaTitle}</h4>
+                            <p className="text-xs text-gray-400 flex items-center gap-2">
+                              <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
+                            </p>
+                            <p className="text-[11px] text-gray-500">Contact: {b.userContact}</p>
+                          </div>
 
-                            <div className="space-y-1">
-                              <div className="relative">
-                                <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₹</span>
-                                <input 
-                                  type="number" 
-                                  placeholder={String(baseGroundPrice)}
-                                  value={slotPrices[selectedDay]?.[slot.time] ?? slot.price}
-                                  onChange={(e) => handlePriceChange(selectedDay, slot.time, Number(e.target.value))}
-                                  className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
-                                />
-                              </div>
-                              <p className="text-[10px] text-gray-500 font-semibold">
-                                Slot Rate: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
-                              </p>
+                          <div className="sm:text-right space-y-1">
+                            <span className="text-xl font-black text-amber-400 block font-mono">₹{b.amount}</span>
+                            <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                              ✓ {b.payment_status === 'offline_cash' ? 'Offline Cash Collected' : 'Payment Collected'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* TAB 3: DYNAMIC TIME & DAY BASED SLOT PRICING */}
+                {ownerTab === 'pricing' && (() => {
+                  const ownerGround = activeOwnerTurf || arenas[0];
+                  const baseGroundPrice = Number(editingBasePrice !== null ? editingBasePrice : (ownerGround?.price_per_hour || ownerGround?.price || 1200));
+
+                  return (
+                    <div className="space-y-6">
+                      <div>
+                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                          Slot Pricing Manager
+                        </span>
+                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Time-based pricing</h2>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Set custom hourly rates per slot for each day of the week or update baseline turf hourly price.
+                        </p>
+                      </div>
+
+                      {/* Main Base Price Input & Day Selector */}
+                      <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-4 sm:p-6 space-y-6 shadow-2xl">
+                        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800/80 pb-4">
+                          <div>
+                            <h3 className="font-bold text-white text-base">{ownerGround?.title || 'Ground Arena'}</h3>
+                            <div className="flex items-center gap-2.5 mt-2">
+                              <label className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                                Turf Base Price Per Hour (₹):
+                              </label>
+                              <input 
+                                type="number"
+                                value={baseGroundPrice}
+                                onChange={(e) => setEditingBasePrice(Number(e.target.value))}
+                                className="w-32 bg-[#080c14] border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-amber-500"
+                              />
                             </div>
                           </div>
-                        ))}
-                      </div>
 
-                      {/* Action Bar */}
-                      <div className="pt-4 border-t border-gray-800 flex justify-end gap-3">
-                        <button 
-                          type="button"
-                          onClick={() => handleSaveOwnerPricing(ownerGround.id, baseGroundPrice)}
-                          className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl shadow-lg transition"
-                        >
-                          Save Pricing
-                        </button>
+                          {/* 7 Day Tabs */}
+                          <div className="flex gap-1 overflow-x-auto bg-[#080c14] p-1.5 rounded-xl border border-gray-800 no-scrollbar">
+                            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day) => (
+                              <button
+                                key={day}
+                                type="button"
+                                onClick={() => setSelectedDay(day)}
+                                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                                  selectedDay === day
+                                    ? 'bg-amber-500 text-black shadow-md font-black'
+                                    : 'text-gray-400 hover:text-white'
+                                }`}
+                              >
+                                {day}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 24-Hour Custom Price Inputs Grid */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[450px] overflow-y-auto pr-1 no-scrollbar">
+                          {getSlotsDataForArena(ownerGround, selectedDateIndex).map((slot) => (
+                            <div 
+                              key={slot.time} 
+                              className="bg-[#080c14] border border-gray-800/80 p-3 rounded-xl space-y-2 hover:border-amber-500/40 transition"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-extrabold text-white">{slot.time}</span>
+                                {slotPrices[selectedDay]?.[slot.time] !== undefined && (
+                                  <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
+                                    Custom
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="space-y-1">
+                                <div className="relative">
+                                  <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₹</span>
+                                  <input 
+                                    type="number" 
+                                    placeholder={String(baseGroundPrice)}
+                                    value={slotPrices[selectedDay]?.[slot.time] ?? slot.price}
+                                    onChange={(e) => handlePriceChange(selectedDay, slot.time, Number(e.target.value))}
+                                    className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
+                                  />
+                                </div>
+                                <p className="text-[10px] text-gray-500 font-semibold">
+                                  Slot Rate: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Action Bar */}
+                        <div className="pt-4 border-t border-gray-800 flex justify-end gap-3">
+                          <button 
+                            type="button"
+                            onClick={() => handleSaveOwnerPricing(ownerGround.id, baseGroundPrice)}
+                            className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl shadow-lg transition"
+                          >
+                            Save Pricing
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })()}
+                  );
+                })()}
 
-              {/* TAB 4: CHECK-IN SCANNER */}
-              {ownerTab === 'checkin' && (
-                <div className="space-y-6">
-                  <div>
-                    <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                      Ticket Check-In
-                    </span>
-                    <h2 className="text-3xl font-extrabold text-white mt-1">Player Ticket Scanner</h2>
-                    <p className="text-xs text-gray-400">Verify player booking reference code at entry</p>
-                  </div>
 
-                  <form onSubmit={handleVerifyTicket} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 max-w-md shadow-2xl">
+
+                {/* TAB 5: MY ACCOUNT */}
+                {ownerTab === 'account' && (
+                  <div className="space-y-6">
                     <div>
-                      <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Booking Ticket Reference Code</label>
-                      <div className="relative">
-                        <ScanLine className="w-5 h-5 absolute left-3.5 top-3 text-amber-500" />
-                        <input 
-                          type="text"
-                          required
-                          value={ticketCode}
-                          onChange={(e) => setTicketCode(e.target.value)}
-                          placeholder="e.g. WD-09TKPU8"
-                          className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-11 pr-4 py-3 text-sm font-mono text-white tracking-widest uppercase focus:outline-none focus:border-amber-500"
-                        />
-                      </div>
-                    </div>
-
-                    <button 
-                      type="submit"
-                      className="w-full bg-amber-500 hover:bg-amber-400 text-black font-extrabold py-3 rounded-xl transition text-xs shadow-lg flex items-center justify-center gap-2"
-                    >
-                      <CheckCircle2 className="w-4 h-4 stroke-[3]" /> Verify & Check-In Player
-                    </button>
-
-                    {checkInStatus && (
-                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs font-bold text-emerald-400 text-center">
-                        {checkInStatus}
-                      </div>
-                    )}
-                  </form>
-                </div>
-              )}
-
-              {/* TAB 5: MY ACCOUNT */}
-              {ownerTab === 'account' && (
-                <div className="space-y-6">
-                  <div>
-                    <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                      Partner Profile
-                    </span>
-                    <h2 className="text-3xl font-extrabold text-white mt-1">Owner Account Details</h2>
-                    <p className="text-xs text-gray-400">Manage account information and payout bank settings</p>
-                  </div>
-
-                  <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 max-w-md shadow-2xl">
-                    <div>
-                      <span className="text-xs text-gray-500 uppercase block font-bold">Partner Email</span>
-                      <span className="text-sm font-bold text-white">owner@windeclare.in</span>
-                    </div>
-
-                    <div>
-                      <span className="text-xs text-gray-500 uppercase block font-bold">Payout UPI / Bank</span>
-                      <span className="text-sm font-mono font-bold text-amber-400">owner@okaxis</span>
-                    </div>
-
-                    <div>
-                      <span className="text-xs text-gray-500 uppercase block font-bold">GST Status</span>
-                      <span className="text-xs text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                        ✓ Registered (18% GST Applicable)
+                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        Partner Profile
                       </span>
+                      <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Owner Account Details</h2>
+                      <p className="text-xs text-gray-400">Manage account information and payout bank settings</p>
+                    </div>
+
+                    <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 max-w-md shadow-2xl">
+                      <div>
+                        <span className="text-xs text-gray-500 uppercase block font-bold">Partner Display Name</span>
+                        <span className="text-sm font-bold text-white">{currentUser?.name || 'Venue Owner'}</span>
+                      </div>
+
+                      <div>
+                        <span className="text-xs text-gray-500 uppercase block font-bold">Partner Contact</span>
+                        <span className="text-sm font-mono text-gray-300">{currentUser?.phone || currentUser?.email || 'N/A'}</span>
+                      </div>
+
+                      <div>
+                        <span className="text-xs text-gray-500 uppercase block font-bold">Payout UPI ID</span>
+                        <span className="text-sm font-mono font-bold text-amber-400">{activeOwnerTurf?.ownerUpiId || 'owner@okaxis'}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </main>
-          </div>
-        )}
+                )}
+              </main>
+            </div>
+          );
+        })()}
 
         {/* VIEW 5: USER PROFILE VIEW (BOOKINGS, FAVORITES, ACCOUNT) */}
         {view === 'profile' && (
@@ -2582,35 +2694,35 @@ export default function WinDeclareApp() {
                   onClick={() => setProfileTab('account')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'account' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
                 >
-                  Settings
+                  Account
                 </button>
               </div>
             </div>
 
-            {/* TAB CONTENT: BOOKINGS */}
+            {/* TAB CONTENT: MY BOOKINGS */}
             {profileTab === 'bookings' && (
               <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-amber-500" /> Active & Upcoming Bookings
+                  <Calendar className="w-4 h-4 text-amber-500" /> Confirmed Booking Tickets
                 </h3>
 
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {myBookings.map((b) => (
                     <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
                       <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-amber-500 uppercase font-mono">{b.id}</span>
-                        <h4 className="font-bold text-white text-sm">{b.arenaTitle}</h4>
-                        <p className="text-xs text-gray-400 flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
-                        </p>
-                        <p className="text-[10px] text-purple-400 font-mono">Plan: {b.planUsed} • Payout: {b.paymentQrUsed}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono font-bold text-amber-400">{b.id}</span>
+                          {b.booking_type === 'offline' && (
+                            <span className="bg-purple-500/20 text-purple-300 text-[9px] font-bold px-1.5 py-0.5 rounded">Offline</span>
+                          )}
+                        </div>
+                        <h4 className="font-bold text-white text-xs">{b.arenaTitle}</h4>
+                        <p className="text-[10px] text-gray-400">{b.date} • {b.slots}</p>
                       </div>
 
                       <div className="text-right">
-                        <span className="text-sm font-black text-amber-400 block font-mono">₹{b.amount}</span>
-                        <span className="text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-2 py-0.5 rounded font-bold inline-block mt-1">
-                          ✓ Confirmed
-                        </span>
+                        <span className="text-sm font-bold text-white font-mono block">₹{b.amount}</span>
+                        <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">✓ Confirmed</span>
                       </div>
                     </div>
                   ))}
@@ -2636,12 +2748,6 @@ export default function WinDeclareApp() {
                           <p className="text-[10px] font-bold text-amber-400 mt-0.5">₹{arena.price}/hr • ★ {arena.rating}</p>
                         </div>
                       </div>
-                      <button 
-                        onClick={() => handleSelectArena(arena)}
-                        className="px-3 py-1.5 bg-amber-500 text-black text-xs font-bold rounded-lg"
-                      >
-                        Book
-                      </button>
                     </div>
                   ))}
                 </div>
@@ -2688,80 +2794,46 @@ export default function WinDeclareApp() {
         )}
       </div>
 
-      {/* POPUP MODAL 1: AUTHENTICATION MODAL (Triggered if player clicks book while not logged in) */}
+      {/* POPUP MODAL: GOOGLE AUTHENTICATION ONLY */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0e1320] border border-gray-800 w-full max-w-md rounded-2xl p-6 shadow-2xl relative space-y-6">
+          <div className="bg-[#0e1320] border border-gray-800 w-full max-w-sm rounded-3xl p-6 sm:p-8 shadow-2xl relative text-center space-y-6">
             <button 
               onClick={() => setShowAuthModal(false)}
-              className="absolute top-4 right-4 text-gray-400 hover:text-white p-1"
+              className="absolute top-4 right-4 text-gray-400 hover:text-white p-1.5 rounded-full bg-gray-900/60 hover:bg-gray-800 transition"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div>
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-500 uppercase tracking-wider">
-                <Lock className="w-3.5 h-3.5" /> Sign In Required
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-xs font-bold text-amber-500 uppercase tracking-wider">
+                <Lock className="w-3.5 h-3.5" /> WinDeclare Access
               </div>
-              <h3 className="text-xl font-extrabold text-white mt-1">Authenticate to Confirm Slot</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Please log in to verify your ticket booking</p>
+              <h3 className="text-2xl font-extrabold text-white">Sign In to Continue</h3>
+              <p className="text-xs text-gray-400 max-w-xs mx-auto">
+                Sign in with your Google account to book sports grounds and manage your tickets instantly.
+              </p>
             </div>
 
-            <div className="space-y-3">
+            <div className="pt-2 pb-1">
               <button 
                 type="button"
                 onClick={handleGoogleSignIn}
-                className="w-full py-3 bg-white text-black font-extrabold text-xs rounded-xl hover:bg-gray-100 transition shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-3.5 px-4 bg-white hover:bg-gray-100 text-black font-extrabold text-sm rounded-2xl transition shadow-xl hover:shadow-2xl flex items-center justify-center gap-3 border border-gray-200 group active:scale-[0.98]"
               >
-                <Mail className="w-4 h-4 text-red-500" /> Continue with Google
+                <svg className="w-5 h-5" viewBox="0 0 24 24">
+                  <path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.3 9 5 12 5z"/>
+                  <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"/>
+                  <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 10.8 0 12s.7 2.3 1.9 4.7l3.7-2.9z"/>
+                  <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.3-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"/>
+                </svg>
+                <span>Continue with Google</span>
               </button>
-
-              <div className="relative flex py-2 items-center">
-                <div className="flex-grow border-t border-gray-800"></div>
-                <span className="flex-shrink mx-4 text-[10px] text-gray-500 uppercase font-bold">Or Mobile Phone OTP</span>
-                <div className="flex-grow border-t border-gray-800"></div>
-              </div>
-
-              {!otpSent ? (
-                <form onSubmit={handleSendOtp} className="space-y-3">
-                  <div className="relative">
-                    <Phone className="w-4 h-4 absolute left-3 top-3 text-gray-500" />
-                    <input 
-                      type="tel"
-                      required
-                      value={phoneNumber}
-                      onChange={(e) => setPhoneNumber(e.target.value)}
-                      placeholder="Enter mobile number for OTP"
-                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-                  <button 
-                    type="submit"
-                    className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg"
-                  >
-                    Send Firebase OTP & Continue
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleVerifyOtp} className="space-y-3">
-                  <input 
-                    type="text"
-                    maxLength={6}
-                    required
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value)}
-                    placeholder="Enter 6-digit OTP code"
-                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-center text-sm font-mono text-amber-400 tracking-widest focus:outline-none focus:border-amber-500"
-                  />
-                  <button 
-                    type="submit"
-                    className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg flex items-center justify-center gap-2"
-                  >
-                    <ShieldCheck className="w-4 h-4" /> Verify OTP & Login
-                  </button>
-                </form>
-              )}
             </div>
+
+            <p className="text-[11px] text-gray-500">
+              By continuing, you agree to WinDeclare's Terms of Service & Privacy Policy.
+            </p>
           </div>
         </div>
       )}
@@ -2977,6 +3049,97 @@ export default function WinDeclareApp() {
           </div>
         );
       })()}
+
+      {/* OWNER PORTAL SLIDE-OUT NAVIGATION DRAWER */}
+      {isOwnerDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          {/* Backdrop overlay */}
+          <div 
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsOwnerDrawerOpen(false)}
+          />
+
+          {/* Drawer content panel */}
+          <div className="relative w-80 max-w-[85vw] bg-[#0c101a] border-r border-gray-800 p-6 shadow-2xl z-10 flex flex-col justify-between h-full">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b border-gray-800 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-gradient-to-tr from-amber-400 to-orange-500 p-2 rounded-xl text-black font-black shadow-lg">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-white text-sm leading-tight">Owner Portal</h3>
+                    <p className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">WinDeclare Partner</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsOwnerDrawerOpen(false)}
+                  className="p-1.5 text-gray-400 hover:text-white rounded-xl bg-gray-900 border border-gray-800 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* 5 Strictly Permitted Navigation Options */}
+              <nav className="space-y-2">
+                <button
+                  onClick={() => { setOwnerTab('calendar'); setIsOwnerDrawerOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
+                    ownerTab === 'calendar' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                  }`}
+                >
+                  <Calendar className="w-4 h-4 text-amber-400" /> Daily Calendar & Offline
+                </button>
+
+                <button
+                  onClick={() => { setOwnerTab('listings'); setShowAddTurfForm(false); setIsOwnerDrawerOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
+                    ownerTab === 'listings' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                  }`}
+                >
+                  <LayoutDashboard className="w-4 h-4 text-amber-400" /> Listings Manager
+                </button>
+
+                <button
+                  onClick={() => { setOwnerTab('pricing'); setIsOwnerDrawerOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
+                    ownerTab === 'pricing' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                  }`}
+                >
+                  <IndianRupee className="w-4 h-4 text-amber-400" /> Slot Pricing
+                </button>
+
+                <button
+                  onClick={() => { setOwnerTab('bookings'); setIsOwnerDrawerOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
+                    ownerTab === 'bookings' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                  }`}
+                >
+                  <Clock className="w-4 h-4 text-amber-400" /> Bookings Ledger
+                </button>
+
+                <button
+                  onClick={() => { setOwnerTab('account'); setIsOwnerDrawerOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
+                    ownerTab === 'account' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                  }`}
+                >
+                  <User className="w-4 h-4 text-amber-400" /> My Account
+                </button>
+              </nav>
+            </div>
+
+            <div className="border-t border-gray-800 pt-4 space-y-2">
+              <button 
+                onClick={() => { setView('browse'); setIsOwnerDrawerOpen(false); showToast('Switched to Player View ⚽'); }}
+                className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-gray-400 hover:text-amber-400 bg-gray-900/50 hover:bg-gray-900 rounded-xl transition"
+              >
+                <LogOut className="w-4 h-4" /> Switch to Player Portal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-gray-800 bg-[#0a0e17] py-8 text-xs text-gray-500">
