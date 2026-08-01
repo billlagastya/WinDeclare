@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Trophy, User, MapPin, Navigation, ArrowLeft,
   Calendar, CheckCircle2, Phone, ShieldCheck,
@@ -491,6 +491,93 @@ export default function WinDeclareApp() {
     fetchBookingsFromSupabase();
   }, []);
 
+  // Fetch Slot Availability for selected arena & date (Player View & Refresh)
+  const fetchSlotAvailability = useCallback(async (arenaId: number | string, dateIndex: number) => {
+    if (!arenaId) return;
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + dateIndex);
+    const selectedDate = targetDate.toISOString().split('T')[0];
+
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('slot_time')
+        .eq('arena_id', arenaId)
+        .eq('booking_date', selectedDate);
+
+      if (!error && data) {
+        const bookedTimes: string[] = [];
+        data.forEach((row: any) => {
+          const slotVal = row.slot_time || row.slots;
+          if (slotVal && typeof slotVal === 'string') {
+            slotVal.split(',').forEach((t: string) => {
+              const trimmed = t.trim();
+              if (trimmed && !bookedTimes.includes(trimmed)) {
+                bookedTimes.push(trimmed);
+              }
+            });
+          }
+        });
+
+        setBookedSlots(prev => {
+          const filtered = prev.filter(b => !(b.arenaId === Number(arenaId) && b.dateIndex === dateIndex));
+          const newEntries: BookedSlot[] = bookedTimes.map(time => ({
+            arenaId: Number(arenaId),
+            dateIndex,
+            time
+          }));
+          return [...filtered, ...newEntries];
+        });
+      }
+    } catch (err) {
+      console.error("Error fetching slot availability:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedArena?.id !== undefined && selectedArena?.id !== null) {
+      fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+    }
+  }, [selectedArena?.id, selectedDateIndex, fetchSlotAvailability]);
+
+  // Fetch Owner Bookings joined with arenas matching owner's ID (Owner Dashboard)
+  const [ownerPortalBookings, setOwnerPortalBookings] = useState<any[]>([]);
+
+  const fetchOwnerBookings = useCallback(async () => {
+    if (!currentUser?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*, arenas!inner(*)')
+        .eq('arenas.user_id', currentUser.id);
+
+      if (error) {
+        console.warn("Owner bookings query notice (trying grounds fallback):", error.message);
+        const { data: fallbackData, error: fallbackErr } = await supabase
+          .from('bookings')
+          .select('*, grounds!inner(*)')
+          .eq('grounds.user_id', currentUser.id);
+
+        if (!fallbackErr && fallbackData) {
+          setOwnerPortalBookings(fallbackData);
+          return;
+        }
+      }
+
+      if (data) {
+        setOwnerPortalBookings(data);
+      }
+    } catch (err) {
+      console.error("Error fetching owner bookings:", err);
+    }
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if ((view === 'owner-portal' || ownerTab === 'bookings') && currentUser?.id) {
+      fetchOwnerBookings();
+    }
+  }, [view, ownerTab, currentUser?.id, fetchOwnerBookings]);
+
   // Fetch Pending Grounds from Supabase Database for Admin Verification
   const fetchPendingGroundsFromSupabase = async () => {
     try {
@@ -923,14 +1010,24 @@ export default function WinDeclareApp() {
     setIsProcessingPayment(true);
 
     const activeDate = datesList[selectedDateIndex];
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + selectedDateIndex);
+    const selectedDate = targetDate.toISOString().split('T')[0];
+
+    const slotsToInsert = selectedSlots.length > 0 
+      ? selectedSlots 
+      : [{ time: '1 Hour Slot', price: selectedArena.price || 1200 }];
+
+    const slotTimeStr = slotsToInsert.map(s => s.time).join(', ');
+
     const newBooking: Booking = {
       id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
       arenaId: Number(selectedArena.id),
       arenaTitle: selectedArena.title,
       date: `${activeDate.day}, Jul ${activeDate.date}`,
       dateIndex: selectedDateIndex,
-      slots: selectedSlots.map(s => s.time).join(', '),
-      amount: totalPrice,
+      slots: slotTimeStr,
+      amount: totalPrice || selectedArena.price || 1200,
       userContact: currentUser?.phone || currentUser?.email || '+91 9505737751',
       planUsed: selectedArena.plan || 'subscription',
       paymentQrUsed: selectedArena.plan === 'subscription' 
@@ -940,64 +1037,58 @@ export default function WinDeclareApp() {
     };
 
     // LOCK SLOTS FOR DOUBLE-BOOKING PREVENTION
-    const newLockedSlots: BookedSlot[] = selectedSlots.map(s => ({
+    const newLockedSlots: BookedSlot[] = slotsToInsert.map(s => ({
       arenaId: Number(selectedArena.id),
       dateIndex: selectedDateIndex,
       time: s.time
     }));
 
-    // Save Booking Record directly to Supabase `bookings` table with status: 'booked'
+    // Save Booking Record directly to Supabase `bookings` table with status: 'confirmed'
+    const recordsToInsert = slotsToInsert.map(s => ({
+      arena_id: selectedArena.id,
+      user_id: currentUser?.id || '',
+      slot_time: s.time,
+      status: 'confirmed',
+      booking_date: selectedDate,
+      booking_id: newBooking.id,
+      ground_id: Number(selectedArena.id),
+      arena_title: selectedArena.title,
+      date: newBooking.date,
+      date_index: selectedDateIndex,
+      slots: newBooking.slots,
+      amount: newBooking.amount,
+      total_amount: newBooking.amount,
+      user_contact: newBooking.userContact,
+      plan_used: newBooking.planUsed,
+      payment_qr_used: newBooking.paymentQrUsed,
+      payment_status: 'completed',
+      created_at: newBooking.createdAt
+    }));
+
     try {
-      const { error } = await supabase.from('bookings').insert([{
-        booking_id: newBooking.id,
-        arena_id: Number(selectedArena.id),
-        ground_id: Number(selectedArena.id),
-        arena_title: selectedArena.title,
-        user_id: currentUser?.id || '',
-        date: newBooking.date,
-        date_index: selectedDateIndex,
-        slots: newBooking.slots,
-        amount: newBooking.amount,
-        user_contact: newBooking.userContact,
-        plan_used: newBooking.planUsed,
-        payment_qr_used: newBooking.paymentQrUsed,
-        status: 'booked',
-        created_at: newBooking.createdAt
-      }]);
+      const { error } = await supabase.from('bookings').insert(recordsToInsert);
 
       if (error) {
-        console.warn("Supabase insert warning (retrying with alternative schema):", error.message);
-        await supabase.from('bookings').insert([{
-          id: newBooking.id,
-          arenaId: Number(selectedArena.id),
-          ground_id: Number(selectedArena.id),
-          arenaTitle: selectedArena.title,
-          user_id: currentUser?.id || '',
-          date: newBooking.date,
-          dateIndex: selectedDateIndex,
-          slots: newBooking.slots,
-          amount: newBooking.amount,
-          userContact: newBooking.userContact,
-          planUsed: newBooking.planUsed,
-          paymentQrUsed: newBooking.paymentQrUsed,
-          status: 'booked',
-          createdAt: newBooking.createdAt
-        }]);
+        console.error("Supabase insert error:", error);
+        showToast(`❌ Booking failed: ${error.message}`);
+        setIsProcessingPayment(false);
+        return;
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Saved booking to Supabase exception:", e);
+      showToast(`❌ Booking error: ${e?.message || 'Unknown error occurred'}`);
+      setIsProcessingPayment(false);
+      return;
     }
 
-    setTimeout(() => {
-      setMyBookings([newBooking, ...myBookings]);
-      setBookedSlots(prev => [...prev, ...newLockedSlots]);
-      setIsProcessingPayment(false);
-      setShowPaymentModal(false);
-      setSelectedSlots([]);
-      showToast(`🎉 Payment Successful! Ticket ID: ${newBooking.id}`);
-      setProfileTab('bookings');
-      setView('profile');
-    }, 2000);
+    setMyBookings(prev => [newBooking, ...prev]);
+    setBookedSlots(prev => [...prev, ...newLockedSlots]);
+    setIsProcessingPayment(false);
+    setShowPaymentModal(false);
+    setSelectedSlots([]);
+    showToast(`🎉 Payment Successful! Ticket ID: ${newBooking.id}`);
+    setProfileTab('bookings');
+    setView('profile');
   };
 
   const toggleSport = (sport: string) => {
@@ -2608,50 +2699,68 @@ export default function WinDeclareApp() {
                 )}
 
                 {/* TAB 2: UPCOMING BOOKINGS */}
-                {ownerTab === 'bookings' && (
-                  <div className="space-y-6">
-                    <div>
-                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                        Bookings Ledger
-                      </span>
-                      <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Player Bookings History</h2>
-                      <p className="text-xs text-gray-400">Live reserved slots across all your venues</p>
-                    </div>
+                {ownerTab === 'bookings' && (() => {
+                  const displayBookings = ownerPortalBookings.length > 0 ? ownerPortalBookings : ownerBookings;
 
-                    <div className="space-y-4">
-                      {ownerBookings.length === 0 ? (
-                        <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 text-center text-xs text-gray-400 font-mono">
-                          No bookings found for your listed turfs yet.
-                        </div>
-                      ) : ownerBookings.map((b) => (
-                        <div key={b.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs font-black text-amber-500 font-mono">{b.id}</span>
-                              {b.booking_type === 'offline' && (
-                                <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
-                                  Offline Walk-In
+                  return (
+                    <div className="space-y-6">
+                      <div>
+                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                          Bookings Ledger
+                        </span>
+                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Player Bookings History</h2>
+                        <p className="text-xs text-gray-400">Live reserved slots across all your venues</p>
+                      </div>
+
+                      <div className="space-y-4">
+                        {displayBookings.length === 0 ? (
+                          <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 text-center text-xs text-gray-400 font-mono">
+                            No bookings found for your listed turfs yet.
+                          </div>
+                        ) : displayBookings.map((b: any, index: number) => {
+                          const bId = b.booking_id || b.id || `WD-${index + 101}`;
+                          const arenaTitle = b.arenas?.title || b.grounds?.title || b.arena_title || b.arenaTitle || 'Turf Arena';
+                          const dateStr = b.date || b.booking_date || '';
+                          const slotsStr = b.slot_time || b.slots || '';
+                          const contactStr = b.user_contact || b.userContact || b.user_id || 'Player Contact';
+                          const amountVal = b.total_amount || b.amount || 0;
+                          const statusVal = b.status || b.payment_status || 'confirmed';
+                          const isOffline = b.booking_type === 'offline';
+
+                          return (
+                            <div key={`${bId}-${index}`} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-black text-amber-500 font-mono">{bId}</span>
+                                  {isOffline && (
+                                    <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                                      Offline Walk-In
+                                    </span>
+                                  )}
+                                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded capitalize">
+                                    {statusVal}
+                                  </span>
+                                </div>
+                                <h4 className="font-bold text-white text-base">{arenaTitle}</h4>
+                                <p className="text-xs text-gray-400 flex items-center gap-2">
+                                  <Clock className="w-3.5 h-3.5 text-amber-400" /> {dateStr} • {slotsStr}
+                                </p>
+                                <p className="text-[11px] text-gray-500">Contact: {contactStr}</p>
+                              </div>
+
+                              <div className="sm:text-right space-y-1">
+                                <span className="text-xl font-black text-amber-400 block font-mono">₹{amountVal}</span>
+                                <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                                  ✓ {b.payment_status === 'offline_cash' ? 'Offline Cash Collected' : 'Payment Collected'}
                                 </span>
-                              )}
+                              </div>
                             </div>
-                            <h4 className="font-bold text-white text-base">{b.arenaTitle}</h4>
-                            <p className="text-xs text-gray-400 flex items-center gap-2">
-                              <Clock className="w-3.5 h-3.5 text-amber-400" /> {b.date} • {b.slots}
-                            </p>
-                            <p className="text-[11px] text-gray-500">Contact: {b.userContact}</p>
-                          </div>
-
-                          <div className="sm:text-right space-y-1">
-                            <span className="text-xl font-black text-amber-400 block font-mono">₹{b.amount}</span>
-                            <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
-                              ✓ {b.payment_status === 'offline_cash' ? 'Offline Cash Collected' : 'Payment Collected'}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* TAB 3: DYNAMIC TIME & DAY BASED SLOT PRICING */}
                 {ownerTab === 'pricing' && (() => {
@@ -3181,67 +3290,69 @@ export default function WinDeclareApp() {
                   targetDate.setDate(targetDate.getDate() + selectedDateIndex);
                   const formattedIsoDate = targetDate.toISOString().split('T')[0];
 
-                  // 1. Database Record: Insert payload into Supabase `bookings` table with status: 'booked'
+                  const slotsToLock = selectedSlots.length > 0 ? selectedSlots : [{ time: slotsStr, price: totalAmount }];
+
+                  const recordsToInsert = slotsToLock.map(s => ({
+                    arena_id: selectedGround.id,
+                    user_id: currentUser?.id || '',
+                    slot_time: s.time,
+                    status: 'confirmed',
+                    booking_date: formattedIsoDate,
+                    booking_id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+                    ground_id: Number(selectedGround.id),
+                    arena_title: selectedGround.title,
+                    date: selectedDate,
+                    date_index: selectedDateIndex,
+                    slots: s.time,
+                    amount: s.price,
+                    total_amount: totalAmount,
+                    user_contact: currentUser?.phone || currentUser?.email || 'Player Session',
+                    plan_used: selectedGround.plan || 'subscription',
+                    payment_qr_used: selectedGround.ownerUpiId || 'owner@okaxis',
+                    payment_status: 'pending_whatsapp',
+                    created_at: new Date().toISOString()
+                  }));
+
                   try {
-                    const bookingRecord = {
-                      booking_id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-                      arena_id: Number(selectedGround.id),
-                      ground_id: Number(selectedGround.id),
-                      arena_title: selectedGround.title,
-                      user_id: currentUser?.id || '',
-                      date: selectedDate,
-                      booking_date: formattedIsoDate,
-                      date_index: selectedDateIndex,
-                      slots: slotsStr,
-                      amount: totalAmount,
-                      total_amount: totalAmount,
-                      user_contact: currentUser?.phone || currentUser?.email || 'Player Session',
-                      plan_used: selectedGround.plan || 'subscription',
-                      payment_qr_used: selectedGround.ownerUpiId || 'owner@okaxis',
-                      status: 'booked',
-                      payment_status: 'pending_whatsapp',
-                      created_at: new Date().toISOString()
-                    };
-
-                    const newBookingObj: Booking = {
-                      id: bookingRecord.booking_id,
-                      arenaId: Number(selectedGround.id),
-                      arenaTitle: selectedGround.title,
-                      date: selectedDate,
-                      dateIndex: selectedDateIndex,
-                      slots: slotsStr,
-                      amount: totalAmount,
-                      userContact: bookingRecord.user_contact,
-                      user_id: currentUser?.id || '',
-                      planUsed: selectedGround.plan || 'subscription',
-                      paymentQrUsed: selectedGround.ownerUpiId || 'owner@okaxis',
-                      booking_type: 'online',
-                      payment_status: 'pending_whatsapp',
-                      createdAt: bookingRecord.created_at
-                    };
-
-                    setMyBookings(prev => [newBookingObj, ...prev]);
-
-                    const { data, error } = await supabase.from('bookings').insert([bookingRecord]);
-
+                    const { error } = await supabase.from('bookings').insert(recordsToInsert);
                     if (error) {
-                      console.warn("Supabase booking insert notice:", error.message);
+                      console.error("Supabase booking insert error:", error);
+                      showToast(`❌ Booking failed: ${error.message}`);
+                      return;
                     }
-                  } catch (err) {
+                  } catch (err: any) {
                     console.error("Booking insert exception:", err);
+                    showToast(`❌ Booking error: ${err?.message || 'Failed to submit booking'}`);
+                    return;
                   }
 
-                  // 3. Prevent Double Booking: Disable booked/pending slots on the calendar
-                  const slotsToLock = selectedSlots.length > 0 ? selectedSlots : [{ time: slotsStr, price: totalAmount }];
+                  const newBookingObj: Booking = {
+                    id: recordsToInsert[0].booking_id,
+                    arenaId: Number(selectedGround.id),
+                    arenaTitle: selectedGround.title,
+                    date: selectedDate,
+                    dateIndex: selectedDateIndex,
+                    slots: slotsStr,
+                    amount: totalAmount,
+                    userContact: recordsToInsert[0].user_contact,
+                    user_id: currentUser?.id || '',
+                    planUsed: selectedGround.plan || 'subscription',
+                    paymentQrUsed: selectedGround.ownerUpiId || 'owner@okaxis',
+                    booking_type: 'online',
+                    payment_status: 'pending_whatsapp',
+                    createdAt: recordsToInsert[0].created_at
+                  };
+
+                  setMyBookings(prev => [newBookingObj, ...prev]);
+
                   const newLockedSlots: BookedSlot[] = slotsToLock.map(s => ({
-                    arenaId: selectedGround.id as any,
+                    arenaId: Number(selectedGround.id),
                     dateIndex: selectedDateIndex,
                     time: s.time
                   }));
                   setBookedSlots(prev => [...prev, ...newLockedSlots]);
                   setSelectedSlots([]);
 
-                  // 2. User UX Feedback: Open WhatsApp in new tab, close modal & display pending toast notification
                   window.open(waUrl, '_blank');
                   setShowPaymentModal(false);
                   showToast("Your booking request is PENDING! Please send your screenshot on WhatsApp so the owner can confirm your slots.");
