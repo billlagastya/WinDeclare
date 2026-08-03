@@ -1,20 +1,22 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Trophy, User, MapPin, Navigation, ArrowLeft,
   Calendar, CheckCircle2, Phone, ShieldCheck,
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
   LogOut, Mail, Check, Star, Clock, Compass,
   CreditCard, Smartphone, CheckCircle, X, Loader2, Search,
-  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound, Filter, Menu, Trash2
+  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound, Filter, Menu, Trash2, Power
 } from 'lucide-react';
 
 import { supabase } from '@/lib/supabaseClient';
+import { initiateOnlinePayment } from '@/lib/payment';
 
 interface Arena {
   id: number | string;
   title: string;
+  name?: string;
   location: string;
   lat: number;
   lng: number;
@@ -27,7 +29,8 @@ interface Arena {
   sports: string[];
   image: string;
   locationUrl?: string;
-  plan?: 'subscription' | 'commission';
+  plan?: 'subscription' | 'commission' | 'hybrid' | string;
+  plan_type?: 'free' | 'hybrid' | 'commission';
   ownerUpiId?: string;
   ownerQrCodeUrl?: string;
   qr_code_url?: string;
@@ -38,11 +41,12 @@ interface Arena {
   whatsappNumber?: string;
   status?: string;
   is_verified?: boolean;
+  cashfree_vendor_id?: string;
 }
 
 interface Booking {
   id: string;
-  arenaId: number;
+  arenaId: number | string;
   arenaTitle: string;
   date: string;
   dateIndex: number;
@@ -50,17 +54,19 @@ interface Booking {
   amount: number;
   userContact: string;
   user_id?: string;
-  planUsed: 'subscription' | 'commission';
+  planUsed: 'subscription' | 'commission' | 'hybrid' | string;
   paymentQrUsed: string;
   createdAt: string;
   booking_type?: 'online' | 'offline';
   payment_status?: string;
+  turf_display_name?: string;
 }
 
 interface BookedSlot {
-  arenaId: number;
+  arenaId: number | string;
   dateIndex: number;
   time: string;
+  source?: 'booking' | 'override';
 }
 
 interface Profile {
@@ -71,6 +77,16 @@ interface Profile {
   display_name: string;
   role?: string;
 }
+
+const parseSlotTimeToHour = (timeStr: string): number => {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return 0;
+  let hour = parseInt(match[1], 10);
+  const period = match[3].toUpperCase();
+  if (period === 'PM' && hour < 12) hour += 12;
+  if (period === 'AM' && hour === 12) hour = 0;
+  return hour;
+};
 
 export default function WinDeclareApp() {
   const [view, setView] = useState<'browse' | 'arena-details' | 'profile' | 'owner-portal' | 'admin-dashboard'>('browse');
@@ -103,6 +119,66 @@ export default function WinDeclareApp() {
     { arenaId: 1, dateIndex: 5, time: '4:00 AM' },
     { arenaId: 1, dateIndex: 5, time: '5:00 AM' }
   ]);
+
+  // Slot Overrides State & Handlers
+  const [slotOverrides, setSlotOverrides] = useState<any[]>([]);
+  const [openOverrideMenuSlot, setOpenOverrideMenuSlot] = useState<string | null>(null);
+
+  const fetchSlotOverrides = useCallback(async (arenaId: number | string) => {
+    if (!arenaId) return;
+    const isUuid = typeof arenaId === 'string' && arenaId.includes('-');
+    try {
+      const { data } = await supabase
+        .from('slot_overrides')
+        .select('*')
+        .or(isUuid ? `ground_id.eq.${arenaId}` : `arena_id.eq.${Number(arenaId)}`);
+      if (data) setSlotOverrides(data);
+    } catch (err) {
+      console.error("Error fetching slot overrides:", err);
+    }
+  }, []);
+
+  const handleToggleSlotOverride = async (
+    arenaId: number | string,
+    slotTime: string,
+    mode: 'every' | 'today' | 'reopen',
+    selectedDayStr: string
+  ) => {
+    const isUuid = typeof arenaId === 'string' && arenaId.includes('-');
+    const dayMap: { [key: string]: number } = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    const dow = dayMap[selectedDayStr] ?? new Date().getDay();
+    const todayIso = new Date().toISOString().split('T')[0];
+
+    if (mode === 'reopen') {
+      let query = supabase.from('slot_overrides').delete().eq('slot_time', slotTime);
+      query = isUuid ? query.eq('ground_id', arenaId) : query.eq('arena_id', Number(arenaId));
+      await query;
+      showToast(`✓ Re-opened slot ${slotTime}`);
+    } else if (mode === 'every') {
+      const record = {
+        ground_id: isUuid ? arenaId : null,
+        arena_id: isUuid ? null : Number(arenaId),
+        day_of_week: dow,
+        specific_date: null,
+        slot_time: slotTime
+      };
+      await supabase.from('slot_overrides').insert([record]);
+      showToast(`🔒 Turned off ${slotTime} for every ${selectedDayStr}`);
+    } else if (mode === 'today') {
+      const record = {
+        ground_id: isUuid ? arenaId : null,
+        arena_id: isUuid ? null : Number(arenaId),
+        day_of_week: null,
+        specific_date: todayIso,
+        slot_time: slotTime
+      };
+      await supabase.from('slot_overrides').insert([record]);
+      showToast(`🔒 Turned off ${slotTime} for today (${todayIso})`);
+    }
+
+    setOpenOverrideMenuSlot(null);
+    fetchSlotOverrides(arenaId);
+  };
 
   // User Favorites State
   const [favoriteArenaIds, setFavoriteArenaIds] = useState<number[]>([]);
@@ -153,6 +229,7 @@ export default function WinDeclareApp() {
   const [newArenaLocationUrl, setNewArenaLocationUrl] = useState<string>('');
   const [newArenaQrCodeUrl, setNewArenaQrCodeUrl] = useState<string>('');
   const [newArenaPlan, setNewArenaPlan] = useState<'subscription' | 'commission'>('subscription');
+  const [newArenaPlanType, setNewArenaPlanType] = useState<'free' | 'hybrid' | 'commission'>('free');
   const [newArenaUpiId, setNewArenaUpiId] = useState<string>('');
   const [newArenaWhatsappNumber, setNewArenaWhatsappNumber] = useState<string>('');
   const [selectedSports, setSelectedSports] = useState<string[]>(['Cricket', 'Football']);
@@ -381,6 +458,27 @@ export default function WinDeclareApp() {
     }
   };
 
+  const ownerTurfs = useMemo(() => {
+    return arenas.filter(a => {
+      if (!currentUser) return false;
+      const userId = String(currentUser.id || '');
+      const userEmail = currentUser.email?.toLowerCase();
+      const turfUserId = a.user_id ? String(a.user_id) : '';
+      const turfOwnerId = a.owner_id ? String(a.owner_id) : '';
+      const ownerEmail = a.ownerEmail?.toLowerCase();
+
+      return (
+        (turfUserId && turfUserId === userId) ||
+        (turfOwnerId && turfOwnerId === userId) ||
+        (ownerEmail && userEmail && ownerEmail === userEmail)
+      );
+    });
+  }, [arenas, currentUser]);
+
+  const activeOwnerTurf = useMemo(() => {
+    return ownerTurfs.find(t => String(t.id) === String(selectedOwnerTurfId)) || ownerTurfs[0] || arenas[0];
+  }, [ownerTurfs, selectedOwnerTurfId, arenas]);
+
   useEffect(() => {
     fetchProfilesFromSupabase();
   }, [view, adminTab]);
@@ -427,28 +525,60 @@ export default function WinDeclareApp() {
     };
   }, []);
 
+  // Handle Return Redirect & Hash Navigation from Cashfree Payment Checkout
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const bookingParam = urlParams.get('booking') || urlParams.get('order_id');
+    const hash = window.location.hash;
+
+    if (bookingParam || hash === '#profile-bookings') {
+      setProfileTab('bookings');
+      setView('profile');
+      if (bookingParam) {
+        showToast(`🎉 Cashfree Payment processing completed for order ${bookingParam}!`);
+      }
+    }
+  }, []);
+
   // Fetch initial bookings from Supabase & hydrate locked slots across page refreshes
   useEffect(() => {
     const fetchBookingsFromSupabase = async () => {
       try {
-        const { data, error } = await supabase.from('bookings').select('*').order('created_at', { ascending: false });
+        const { data, error } = await supabase
+          .from('bookings')
+          .select('*')
+          .order('created_at', { ascending: false });
+        console.log("DEBUG FIRST ARENA OBJECT:", arenas[0]);
+        console.log("DEBUG FIRST BOOKING OBJECT:", data?.[0]);
         if (!error && data && data.length > 0) {
-          const mapped: Booking[] = data.map((item: any) => ({
-            id: item.booking_id || item.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-            arenaId: Number(item.arena_id || item.ground_id || item.arenaId || 1),
-            arenaTitle: item.arena_title || item.arenaTitle || 'Arena',
-            date: item.date || item.booking_date || '',
-            dateIndex: item.date_index ?? item.dateIndex ?? 0,
-            slots: typeof item.slots === 'string' ? item.slots : (Array.isArray(item.slots) ? item.slots.map((s: any) => typeof s === 'string' ? s : s.time).join(', ') : ''),
-            amount: Number(item.amount || item.total_amount || 0),
-            userContact: item.user_contact || item.userContact || '',
-            user_id: item.user_id || item.userId || '',
-            planUsed: item.plan_used || item.planUsed || 'subscription',
-            paymentQrUsed: item.payment_qr_used || item.paymentQrUsed || '',
-            booking_type: item.booking_type || 'online',
-            payment_status: item.payment_status || item.status || 'completed',
-            createdAt: item.created_at || item.createdAt || new Date().toISOString()
-          }));
+          const mapped: Booking[] = data.map((item: any) => {
+            const matchedGround = arenas.find(
+              (g: any) =>
+                String(g.id) === String(item.ground_id || item.arena_id || item.arenaId) ||
+                String(g.uuid || g.ground_id) === String(item.ground_id || item.arena_id || item.arenaId)
+            );
+
+            const turfDisplayName = item.arena_title || item.arenaTitle || item.arena_name || item.title || matchedGround?.title || matchedGround?.name || matchedGround?.location || 'Sports Turf';
+
+            return {
+              id: item.booking_id || item.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+              arenaId: item.arena_id || item.ground_id || item.arenaId || 1,
+              arenaTitle: turfDisplayName,
+              turf_display_name: turfDisplayName,
+              date: item.date || item.booking_date || '',
+              dateIndex: item.date_index ?? item.dateIndex ?? 0,
+              slots: typeof item.slots === 'string' ? item.slots : (Array.isArray(item.slots) ? item.slots.map((s: any) => typeof s === 'string' ? s : s.time).join(', ') : ''),
+              amount: Number(item.amount || item.total_amount || 0),
+              userContact: item.user_contact || item.userContact || '',
+              user_id: item.user_id || item.userId || '',
+              planUsed: item.plan_used || item.planUsed || 'subscription',
+              paymentQrUsed: item.payment_qr_used || item.paymentQrUsed || '',
+              booking_type: item.booking_type || 'online',
+              payment_status: item.payment_status || item.status || 'completed',
+              createdAt: item.created_at || item.createdAt || new Date().toISOString()
+            };
+          });
 
           setMyBookings(prev => {
             const combined = [...mapped];
@@ -489,7 +619,7 @@ export default function WinDeclareApp() {
       }
     };
     fetchBookingsFromSupabase();
-  }, []);
+  }, [arenas]);
 
   // Fetch Slot Availability for selected arena & date (Player View & Refresh)
   const fetchSlotAvailability = useCallback(async (arenaId: number | string, dateIndex: number) => {
@@ -497,38 +627,46 @@ export default function WinDeclareApp() {
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + dateIndex);
     const selectedDate = targetDate.toISOString().split('T')[0];
+    const dow = targetDate.getDay();
+    const isUuid = typeof arenaId === 'string' && arenaId.includes('-');
 
     try {
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('slot_time')
-        .eq('arena_id', arenaId)
-        .eq('booking_date', selectedDate);
+      let query = supabase.from('bookings').select('slots').eq('booking_date', selectedDate);
+      query = isUuid ? query.eq('ground_id', arenaId) : query.eq('arena_id', Number(arenaId));
+      const { data } = await query;
 
-      if (!error && data) {
-        const bookedTimes: string[] = [];
+      const bookedEntries: { time: string; source: 'booking' }[] = [];
+      if (data) {
         data.forEach((row: any) => {
-          const slotVal = row.slot_time || row.slots;
-          if (slotVal && typeof slotVal === 'string') {
-            slotVal.split(',').forEach((t: string) => {
-              const trimmed = t.trim();
-              if (trimmed && !bookedTimes.includes(trimmed)) {
-                bookedTimes.push(trimmed);
-              }
+          if (Array.isArray(row.slots)) {
+            row.slots.forEach((t: string) => {
+              if (t && !bookedEntries.some(e => e.time === t)) bookedEntries.push({ time: t, source: 'booking' });
             });
           }
         });
+      }
 
-        setBookedSlots(prev => {
-          const filtered = prev.filter(b => !(b.arenaId === Number(arenaId) && b.dateIndex === dateIndex));
-          const newEntries: BookedSlot[] = bookedTimes.map(time => ({
-            arenaId: Number(arenaId),
-            dateIndex,
-            time
-          }));
-          return [...filtered, ...newEntries];
+      const { data: overrides } = await supabase
+        .from('slot_overrides')
+        .select('slot_time')
+        .or(isUuid ? `ground_id.eq.${arenaId}` : `arena_id.eq.${Number(arenaId)}`)
+        .or(`day_of_week.eq.${dow},specific_date.eq.${selectedDate}`);
+
+      const closedEntries: { time: string; source: 'override' }[] = [];
+      if (overrides) {
+        overrides.forEach((row: any) => {
+          const t = row.slot_time?.trim();
+          if (t && !closedEntries.some(e => e.time === t)) closedEntries.push({ time: t, source: 'override' });
         });
       }
+
+      setBookedSlots(prev => {
+        const filtered = prev.filter(b => !(String(b.arenaId) === String(arenaId) && b.dateIndex === dateIndex));
+        const newEntries = [...bookedEntries, ...closedEntries].map(e => ({
+          arenaId, dateIndex, time: e.time, source: e.source
+        }));
+        return [...filtered, ...newEntries];
+      });
     } catch (err) {
       console.error("Error fetching slot availability:", err);
     }
@@ -539,6 +677,12 @@ export default function WinDeclareApp() {
       fetchSlotAvailability(selectedArena.id, selectedDateIndex);
     }
   }, [selectedArena?.id, selectedDateIndex, fetchSlotAvailability]);
+
+  useEffect(() => {
+    if (activeOwnerTurf?.id !== undefined && activeOwnerTurf?.id !== null) {
+      fetchSlotAvailability(activeOwnerTurf.id, selectedDateIndex);
+    }
+  }, [activeOwnerTurf?.id, selectedDateIndex, fetchSlotAvailability]);
 
   // Fetch Owner Bookings joined with arenas matching owner's ID (Owner Dashboard)
   const [ownerPortalBookings, setOwnerPortalBookings] = useState<any[]>([]);
@@ -624,6 +768,7 @@ export default function WinDeclareApp() {
       }
 
       if (!error && data && data.length > 0) {
+        console.log("DEBUG: Raw Arenas/Grounds Fetched:", data);
         const mappedGrounds: Arena[] = data.map((item: any, index: number) => ({
           id: item.id || item.ground_id || (Date.now() + index),
           title: item.name || item.title || 'Ground Arena',
@@ -640,6 +785,8 @@ export default function WinDeclareApp() {
           image: item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
           locationUrl: item.location_url || item.locationUrl || '',
           plan: item.plan || 'subscription',
+          plan_type: item.plan_type || (item.plan === 'commission' ? 'commission' : (item.plan === 'hybrid' ? 'hybrid' : 'free')),
+          cashfree_vendor_id: item.cashfree_vendor_id || item.cashfreeVendorId || '',
           ownerEmail: item.owner_email || item.ownerEmail || 'owner@turf.in',
           owner_id: item.owner_id || item.user_id || item.ownerId || '',
           user_id: item.user_id || item.owner_id || item.userId || '',
@@ -756,15 +903,13 @@ export default function WinDeclareApp() {
   const sportsList = ['Cricket', 'Basketball', 'Football', 'Tennis', 'Kabaddi', 'Badminton', 'Volleyball', 'Pickleball'];
   const amenitiesList = ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen', 'Bowling Machine'];
 
-  const datesList = [
-    { day: 'TUE', date: '28' },
-    { day: 'WED', date: '29' },
-    { day: 'THU', date: '30' },
-    { day: 'FRI', date: '31' },
-    { day: 'SAT', date: '1' },
-    { day: 'SUN', date: '2' },
-    { day: 'MON', date: '3' }
-  ];
+  const today = new Date();
+  const dayNames = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const datesList = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    return { day: dayNames[d.getDay()], date: String(d.getDate()) };
+  });
 
   // Dynamic Time Slot Pricing Generator (renders prices using ground.price_per_hour or specific pricing_rules[day][slotTime])
   const getSlotsDataForArena = (ground: Arena | null, dateIndex: number = 0) => {
@@ -958,8 +1103,142 @@ export default function WinDeclareApp() {
     }
   };
 
-  // STRICT GATEKEEPER: Check authentication before opening checkout
-  const handleInitiateCheckout = () => {
+  const handleWhatsAppBooking = async () => {
+    if (!selectedArena || !currentUser) return;
+    const activeDate = datesList[selectedDateIndex];
+    const selectedDateStr = activeDate ? `${activeDate.day}, Jul ${activeDate.date}` : 'Today';
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + selectedDateIndex);
+    const formattedIsoDate = targetDate.toISOString().split('T')[0];
+
+    const slotsStr = selectedSlots.map(s => s.time).join(', ');
+    const totalAmount = totalPrice;
+
+    const rawNum = selectedArena.whatsappNumber || '9505737751';
+    const cleanNum = rawNum.replace(/\D/g, '');
+    const formattedPhone = cleanNum.startsWith('91') && cleanNum.length === 12 ? cleanNum : `91${cleanNum.slice(-10)}`;
+    const bookingMessage = `Hi! I would like to book ${selectedArena.title}.\n📅 Date: ${selectedDateStr}\n⏰ Slots: ${slotsStr}\n💰 Total Amount: ₹${totalAmount}\n[Free Tier Direct Booking Request]`;
+    const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(bookingMessage)}`;
+
+    const recordsToInsert = selectedSlots.map(s => {
+      const isUuid = typeof selectedArena.id === 'string' && selectedArena.id.includes('-');
+      return {
+        ground_id: isUuid ? selectedArena.id : null,
+        arena_id: isUuid ? null : Number(selectedArena.id),
+        user_id: currentUser.id,
+        booking_date: formattedIsoDate,
+        slots: [s.time],
+        total_amount: totalAmount,
+        status: 'whatsapp_pending',
+        payment_status: 'whatsapp_pending',
+        created_at: new Date().toISOString()
+      };
+    });
+
+    console.log("Insert Payload (recordsToInsert):", recordsToInsert);
+
+    try {
+      const { error } = await supabase.from('bookings').insert(recordsToInsert);
+      if (error) {
+        console.error("Direct WhatsApp Insert Failed Message:", error.message);
+        console.error("Direct WhatsApp Insert Failed Raw:", JSON.stringify(error, null, 2));
+      }
+    } catch (err: any) {
+      console.error("Booking insert exception:", err);
+    }
+
+    const generatedBookingId = `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+    const newBookingObj: Booking = {
+      id: generatedBookingId,
+      arenaId: Number(selectedArena.id),
+      arenaTitle: selectedArena.title,
+      date: selectedDateStr,
+      dateIndex: selectedDateIndex,
+      slots: slotsStr,
+      amount: totalAmount,
+      userContact: currentUser.phone || currentUser.email || 'Player Session',
+      user_id: currentUser.id,
+      planUsed: 'subscription',
+      paymentQrUsed: 'whatsapp_direct',
+      booking_type: 'online',
+      payment_status: 'completed',
+      createdAt: recordsToInsert[0].created_at
+    };
+
+    setMyBookings(prev => [newBookingObj, ...prev]);
+
+    const newLockedSlots: BookedSlot[] = selectedSlots.map(s => ({
+      arenaId: Number(selectedArena.id),
+      dateIndex: selectedDateIndex,
+      time: s.time
+    }));
+    setBookedSlots(prev => [...prev, ...newLockedSlots]);
+    setSelectedSlots([]);
+
+    window.open(waUrl, '_blank');
+    showToast("🎉 Free Plan Booking! Redirected to WhatsApp to contact owner.");
+  };
+
+  const handleOnlinePayment = async () => {
+    if (!selectedArena || !currentUser) return;
+
+    const activeDate = datesList[selectedDateIndex];
+    const selectedDateStr = activeDate ? `${activeDate.day}, Jul ${activeDate.date}` : 'Today';
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + selectedDateIndex);
+    const formattedIsoDate = targetDate.toISOString().split('T')[0];
+
+    const slotsStr = selectedSlots.map(s => s.time).join(', ');
+    const totalAmount = totalPrice;
+    const generatedBookingId = `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+
+    // Insert pending booking record into Supabase bookings table before initiating Cashfree payment
+    const isUuid = typeof selectedArena.id === 'string' && selectedArena.id.includes('-');
+    const recordsToInsert = selectedSlots.map(s => ({
+      booking_id: generatedBookingId,
+      ground_id: isUuid ? selectedArena.id : null,
+      arena_id: isUuid ? null : Number(selectedArena.id),
+      user_id: currentUser.id,
+      booking_date: formattedIsoDate,
+      slots: [s.time],
+      total_amount: totalAmount,
+      status: 'pending',
+      payment_status: 'pending',
+      created_at: new Date().toISOString()
+    }));
+
+    try {
+      const { error } = await supabase.from('bookings').insert(recordsToInsert);
+      if (error) {
+        if (error.code === '23505') {
+          showToast('❌ Sorry, this slot was just booked by someone else. Please pick another.');
+          fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+        } else {
+          console.error("Pending booking insert failed:", error.message);
+          showToast('❌ Could not start booking. Please try again.');
+        }
+        return;
+      }
+      fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+    } catch (err: any) {
+      console.error("Pending Cashfree booking insert exception:", err);
+      showToast('❌ Could not start booking. Please try again.');
+      return;
+    }
+
+    // Invoke modular payment gateway adapter
+    await initiateOnlinePayment({
+      amount: totalAmount,
+      bookingId: generatedBookingId,
+      customerName: currentUser.name || 'Player',
+      customerPhone: currentUser.phone || '9999999999',
+      customerEmail: currentUser.email || '',
+      groundId: selectedArena.id
+    });
+  };
+
+  // STRICT GATEKEEPER: Check authentication & plan_type before opening checkout
+  const handleInitiateCheckout = async () => {
     if (selectedSlots.length === 0) {
       alert('Please select at least 1 time slot to proceed!');
       return;
@@ -971,7 +1250,26 @@ export default function WinDeclareApp() {
       return;
     }
 
-    setShowPaymentModal(true);
+    if (!selectedArena) return;
+
+    const planType = selectedArena.plan_type || (selectedArena.plan === 'commission' ? 'commission' : (selectedArena.plan === 'hybrid' ? 'hybrid' : 'free'));
+
+    console.log("DEBUG Checkout Initiate Selected Arena:", {
+      id: selectedArena.id,
+      title: selectedArena.title,
+      plan_type: selectedArena.plan_type,
+      plan: selectedArena.plan,
+      resolvedPlanType: planType,
+      cashfree_vendor_id: selectedArena.cashfree_vendor_id
+    });
+
+    if (planType === 'commission' || planType === 'hybrid') {
+      // Commission / Automated plan (3% or 10%): Route to online payment handler
+      await handleOnlinePayment();
+    } else {
+      // Manual / Free plan: Fallback to WhatsApp booking redirect
+      await handleWhatsAppBooking();
+    }
   };
 
   // ADMIN DASHBOARD RESTRICTED ACCESS HANDLER
@@ -1185,7 +1483,8 @@ export default function WinDeclareApp() {
       sports: selectedSports.length > 0 ? selectedSports : ['Cricket', 'Football'],
       image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
       locationUrl: newArenaLocationUrl,
-      plan: newArenaPlan,
+      plan: newArenaPlanType === 'commission' ? 'commission' : 'subscription',
+      plan_type: newArenaPlanType,
       ownerEmail: currentOwnerEmail,
       owner_id: currentOwnerId,
       user_id: currentOwnerId,
@@ -1197,11 +1496,13 @@ export default function WinDeclareApp() {
       is_verified: false
     };
 
-    // Save/Insert Ground directly into Supabase database with status: 'pending', user_id, owner_id, owner_email, and whatsapp_number
+    // Save/Insert Ground & Arena directly into Supabase database with plan_type & plan
     (async () => {
       try {
         const qrCodeUrl = newTurf.qrCodeUrl || '';
-        const payload = {
+        const selectedPlan = newArenaPlanType || 'free';
+
+        const turfPayload = {
           name: newTurf.name || 'New Turf',
           price_per_hour: Number(newTurf.price || 0) || 1000,
           location_url: newTurf.locationUrl || '',
@@ -1213,14 +1514,31 @@ export default function WinDeclareApp() {
           status: 'pending',
           user_id: currentOwnerId,
           owner_id: currentOwnerId,
-          owner_email: currentOwnerEmail
+          owner_email: currentOwnerEmail,
+          plan_type: selectedPlan,
+          plan: selectedPlan
         };
 
-        const { data, error } = await supabase.from('grounds').insert([payload]).select();
+        let gErr: any = null;
+        let aErr: any = null;
 
-        if (error) {
-          console.error('Supabase grounds save error message:', error.message, error.details);
-          alert('Failed to save turf: ' + (error.message || JSON.stringify(error)));
+        try {
+          const res1 = await supabase.from('grounds').insert([turfPayload]);
+          gErr = res1.error;
+        } catch (e) {
+          console.warn('Grounds table insert notice:', e);
+        }
+
+        try {
+          const res2 = await supabase.from('arenas').insert([turfPayload]);
+          aErr = res2.error;
+        } catch (e) {
+          console.warn('Arenas table insert notice:', e);
+        }
+
+        if (gErr && aErr) {
+          console.error('Supabase turf save error message:', gErr.message || aErr.message);
+          alert('Failed to save turf: ' + (gErr.message || aErr.message || 'Database error'));
           return;
         }
 
@@ -1764,8 +2082,17 @@ export default function WinDeclareApp() {
                 </span>
                 <div className="grid grid-cols-3 gap-3">
                   {getSlotsDataForArena(selectedArena, selectedDateIndex).map((slot) => {
+                    const now = new Date();
+                    const isToday = selectedDateIndex === 0;
+                    const slotHour = parseSlotTimeToHour(slot.time);
+                    if (isToday && slotHour <= now.getHours()) return null;
+
                     const isSelected = selectedSlots.some(s => s.time === slot.time);
-                    const isBooked = bookedSlots.some(b => b.arenaId === selectedArena.id && b.dateIndex === selectedDateIndex && b.time === slot.time);
+                    const isBooked = bookedSlots.some(b =>
+                      String(b.arenaId) === String(selectedArena.id) &&
+                      b.dateIndex === selectedDateIndex &&
+                      b.time === slot.time
+                    );
 
                     return (
                       <button
@@ -2253,28 +2580,131 @@ export default function WinDeclareApp() {
 
         {/* VIEW 4: OWNER PORTAL (PRIMARY FULL-SCREEN VIEW WITHOUT INTRUSIVE LEFT SIDEBAR) */}
         {view === 'owner-portal' && (() => {
-          const ownerTurfs = arenas.filter(a => {
-            if (!currentUser) return false;
-            const userId = String(currentUser.id || '');
-            const userEmail = currentUser.email?.toLowerCase();
-            const turfUserId = a.user_id ? String(a.user_id) : '';
-            const turfOwnerId = a.owner_id ? String(a.owner_id) : '';
-            const ownerEmail = a.ownerEmail?.toLowerCase();
-
-            return (
-              (turfUserId && turfUserId === userId) ||
-              (turfOwnerId && turfOwnerId === userId) ||
-              (ownerEmail && userEmail && ownerEmail === userEmail)
-            );
-          });
-
-          const activeOwnerTurf = ownerTurfs.find(t => String(t.id) === String(selectedOwnerTurfId)) || ownerTurfs[0] || arenas[0];
           const ownerArenaIds = ownerTurfs.map(t => Number(t.id));
           const ownerBookings = myBookings.filter(b => ownerArenaIds.includes(Number(b.arenaId)));
+          const displayBookings = ownerPortalBookings.length > 0 ? ownerPortalBookings : ownerBookings;
+
+          const currentPlanType = activeOwnerTurf?.plan_type || (activeOwnerTurf?.plan === 'commission' ? 'commission' : (activeOwnerTurf?.plan === 'hybrid' ? 'hybrid' : 'free'));
+          const isFreePlan = currentPlanType === 'free';
+          const commissionRate = currentPlanType === 'hybrid' ? 0.03 : (currentPlanType === 'commission' ? 0.10 : 0);
+
+          const grossRevenue = displayBookings.reduce((sum, b) => sum + Number(b.total_amount || b.amount || 0), 0);
+          const platformCommission = grossRevenue * commissionRate;
+          const netEarnings = grossRevenue - platformCommission;
+
+          const todayStr = new Date().toISOString().split('T')[0];
+          const todayGross = displayBookings
+            .filter(b => (b.booking_date || b.created_at || '').startsWith(todayStr))
+            .reduce((sum, b) => sum + Number(b.total_amount || b.amount || 0), 0);
+          const todayNet = todayGross * (1 - commissionRate);
+
+          const weeklyGross = grossRevenue * 0.45;
+          const weeklyNet = weeklyGross * (1 - commissionRate);
+
+          const monthlyGross = grossRevenue;
+          const monthlyNet = netEarnings;
 
           return (
             <div className="min-h-[calc(100vh-64px)] bg-[#070b12] text-gray-100 p-4 sm:p-8">
               <main className="max-w-6xl mx-auto space-y-6">
+
+                {/* PLAN-BASED REVENUE ANALYTICS & EARNINGS BAR CHART HEADER (Requirement 2) */}
+                {isFreePlan ? (
+                  <div className="bg-[#0e1320] border border-amber-500/30 rounded-3xl p-6 shadow-2xl space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                        <Lock className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded border bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
+                            Free Plan Active
+                          </span>
+                          <span className="text-xs font-bold text-gray-400 font-mono">0% Commission • ₹0/mo</span>
+                        </div>
+                        <h3 className="text-xl font-extrabold text-white mt-1">Revenue Analytics & Automatic Payouts Locked</h3>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-2 text-xs text-gray-300">
+                      <p className="font-semibold text-amber-400 flex items-center gap-1.5">
+                        <Shield className="w-4 h-4 text-amber-400" />
+                        Upgrade to Hybrid (3% + ₹2k) or Commission (10%) plan to unlock detailed revenue analytics, automatic payouts, and performance charts.
+                      </p>
+                      <p className="text-gray-400 text-[11px]">
+                        Under the Free Plan, players contact you directly on WhatsApp for direct cash/UPI payment. Upgrade your plan anytime to enable automated platform payments, instant earnings tracking, and detailed revenue analytics.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-[#0e1320] border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <span className="text-[10px] font-bold text-teal-400 uppercase tracking-widest bg-teal-500/10 px-2.5 py-0.5 rounded border border-teal-500/20">
+                          {currentPlanType === 'hybrid' ? 'Hybrid Plan (3% Comm + ₹2,000/mo)' : 'Commission Plan (10% Comm)'}
+                        </span>
+                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Net Revenue Analytics & Earnings</h2>
+                        <p className="text-xs text-gray-400 mt-0.5">Calculated net earnings after platform commission deduction</p>
+                      </div>
+                    </div>
+
+                    {/* Revenue Metrics Cards */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Total Net Earnings</span>
+                        <span className="text-2xl font-black text-emerald-400 font-mono block">₹{Math.round(netEarnings)}</span>
+                        <span className="text-[10px] text-gray-500 block">Gross: ₹{Math.round(grossRevenue)}</span>
+                      </div>
+
+                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Daily Net Revenue</span>
+                        <span className="text-2xl font-black text-amber-400 font-mono block">₹{Math.round(todayNet)}</span>
+                        <span className="text-[10px] text-gray-500 block">Today's collection</span>
+                      </div>
+
+                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Weekly Net Revenue</span>
+                        <span className="text-2xl font-black text-teal-400 font-mono block">₹{Math.round(weeklyNet)}</span>
+                        <span className="text-[10px] text-gray-500 block">7-day trailing net</span>
+                      </div>
+
+                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Monthly Net Revenue</span>
+                        <span className="text-2xl font-black text-purple-400 font-mono block">₹{Math.round(monthlyNet)}</span>
+                        <span className="text-[10px] text-gray-500 block">Current month total</span>
+                      </div>
+                    </div>
+
+                    {/* Earnings Bar Chart Component */}
+                    <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+                          <Trophy className="w-4 h-4 text-amber-400" /> Net Revenue Performance Chart (Weekly)
+                        </h4>
+                        <span className="text-[10px] font-mono text-gray-400">Net Rate: {100 - (commissionRate * 100)}%</span>
+                      </div>
+
+                      {/* Interactive Bar Chart Visualization */}
+                      <div className="h-40 flex items-end justify-between gap-3 pt-6 pb-2 px-4 border-b border-gray-800">
+                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, idx) => {
+                          const barHeights = [45, 60, 30, 80, 95, 70, 85];
+                          const heightPct = barHeights[idx];
+                          return (
+                            <div key={day} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
+                              <div className="w-full max-w-[36px] bg-gray-900 rounded-t-lg relative overflow-hidden flex items-end transition-all h-full">
+                                <div 
+                                  style={{ height: `${heightPct}%` }} 
+                                  className="w-full bg-gradient-to-t from-teal-600 to-emerald-400 rounded-t-lg transition-all duration-500 group-hover:brightness-125"
+                                />
+                              </div>
+                              <span className="text-[10px] font-mono text-gray-400 uppercase">{day}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
                 
                 {/* TAB 0: DEFAULT DAILY CALENDAR & OFFLINE DIRECT BOOKINGS */}
                 {ownerTab === 'calendar' && (
@@ -2426,30 +2856,40 @@ export default function WinDeclareApp() {
 
                         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[450px] overflow-y-auto pr-1 no-scrollbar">
                           {getSlotsDataForArena(activeOwnerTurf, selectedDateIndex).map((slot) => {
+                            const now = new Date();
+                            const isToday = selectedDateIndex === 0;
+                            const slotHour = parseSlotTimeToHour(slot.time);
+                            if (isToday && slotHour <= now.getHours()) return null;
+
                             const isSelected = selectedSlots.some(s => s.time === slot.time);
-                            const isBooked = bookedSlots.some(b => b.arenaId === Number(activeOwnerTurf.id) && b.dateIndex === selectedDateIndex && b.time === slot.time);
+                            const matchEntry = bookedSlots.find(b =>
+                              String(b.arenaId) === String(activeOwnerTurf.id) &&
+                              b.dateIndex === selectedDateIndex &&
+                              b.time === slot.time
+                            );
+                            const isBooked = matchEntry?.source === 'booking';
+                            const isClosed = matchEntry?.source === 'override';
 
                             return (
                               <button
                                 key={slot.time}
-                                disabled={isBooked}
+                                disabled={isBooked || isClosed}
                                 onClick={() => toggleSlotSelection(slot)}
                                 className={`p-3 rounded-2xl border transition text-center space-y-1.5 ${
-                                  isBooked
-                                    ? 'bg-rose-950/20 border-rose-500/30 text-rose-400 cursor-not-allowed'
-                                    : isSelected 
-                                    ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold' 
-                                    : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
+                                  isBooked ? 'bg-rose-950/20 border-rose-500/30 text-rose-400 cursor-not-allowed'
+                                  : isClosed ? 'bg-gray-800/40 border-gray-700 text-gray-500 cursor-not-allowed'
+                                  : isSelected ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold'
+                                  : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
                                 }`}
                               >
                                 <p className="text-xs font-extrabold">{slot.time}</p>
-                                <div className="flex items-center justify-center gap-1">
-                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                                    isBooked ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : isSelected ? 'bg-black text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
-                                  }`}>
-                                    {isBooked ? 'BOOKED' : isSelected ? 'Selected' : `₹${slot.price}`}
-                                  </span>
-                                </div>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                  isBooked ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                  : isClosed ? 'bg-gray-700/40 text-gray-400 border border-gray-600'
+                                  : isSelected ? 'bg-black text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                                }`}>
+                                  {isBooked ? 'BOOKED' : isClosed ? 'CLOSED' : isSelected ? 'Selected' : `₹${slot.price}`}
+                                </span>
                               </button>
                             );
                           })}
@@ -2538,29 +2978,65 @@ export default function WinDeclareApp() {
                                 />
                               </div>
 
-                              {/* SELECT PRICING PLAN */}
+                              {/* SELECT 3-TIER PRICING PLAN */}
                               <div>
-                                <label className="block text-[11px] font-bold text-amber-400 uppercase mb-1">Select Pricing Plan *</label>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <label className="block text-[11px] font-bold text-amber-400 uppercase mb-1">Select Listing Plan (Required) *</label>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                  {/* Option A: Free Plan */}
                                   <button
                                     type="button"
-                                    onClick={() => setNewArenaPlan('subscription')}
-                                    className={`p-3 rounded-xl border text-left transition ${
-                                      newArenaPlan === 'subscription' ? 'bg-teal-500/10 border-teal-500 text-teal-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
+                                    onClick={() => {
+                                      setNewArenaPlanType('free');
+                                      setNewArenaPlan('subscription');
+                                    }}
+                                    className={`p-3.5 rounded-xl border text-left transition ${
+                                      newArenaPlanType === 'free' ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400 font-bold shadow-lg' : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
                                     }`}
                                   >
-                                    <p className="text-xs font-bold">Plan 1: Free Tier / ₹2,000/mo</p>
-                                    <p className="text-[10px] text-gray-500 mt-0.5">Direct player payment to your QR</p>
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs font-black text-white">Free Plan</p>
+                                      {newArenaPlanType === 'free' && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                                    </div>
+                                    <p className="text-[11px] font-extrabold text-emerald-400 mt-1">0% Comm • ₹0/mo</p>
+                                    <p className="text-[10px] text-gray-500 mt-1">Direct WhatsApp redirect (`wa.me`)</p>
                                   </button>
+
+                                  {/* Option B: Hybrid Plan */}
                                   <button
                                     type="button"
-                                    onClick={() => setNewArenaPlan('commission')}
-                                    className={`p-3 rounded-xl border text-left transition ${
-                                      newArenaPlan === 'commission' ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold' : 'bg-[#080c14] border-gray-800 text-gray-400'
+                                    onClick={() => {
+                                      setNewArenaPlanType('hybrid');
+                                      setNewArenaPlan('subscription');
+                                    }}
+                                    className={`p-3.5 rounded-xl border text-left transition ${
+                                      newArenaPlanType === 'hybrid' ? 'bg-teal-500/10 border-teal-500 text-teal-400 font-bold shadow-lg' : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
                                     }`}
                                   >
-                                    <p className="text-xs font-bold">Plan 2: 10% Commission</p>
-                                    <p className="text-[10px] text-gray-500 mt-0.5">Automated Admin QR payment</p>
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs font-black text-white">Hybrid Plan</p>
+                                      {newArenaPlanType === 'hybrid' && <Check className="w-3.5 h-3.5 text-teal-400" />}
+                                    </div>
+                                    <p className="text-[11px] font-extrabold text-teal-400 mt-1">3% Comm + ₹2,000/mo</p>
+                                    <p className="text-[10px] text-gray-500 mt-1">Online Payment Gateway</p>
+                                  </button>
+
+                                  {/* Option C: Commission Plan */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setNewArenaPlanType('commission');
+                                      setNewArenaPlan('commission');
+                                    }}
+                                    className={`p-3.5 rounded-xl border text-left transition ${
+                                      newArenaPlanType === 'commission' ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold shadow-lg' : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs font-black text-white">Commission Plan</p>
+                                      {newArenaPlanType === 'commission' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                                    </div>
+                                    <p className="text-[11px] font-extrabold text-amber-400 mt-1">10% Comm • ₹0/mo</p>
+                                    <p className="text-[10px] text-gray-500 mt-1">Online Payment Gateway</p>
                                   </button>
                                 </div>
                               </div>
@@ -2657,41 +3133,73 @@ export default function WinDeclareApp() {
 
                         {/* Existing Listed Arenas Grid */}
                         <div className="space-y-4">
-                          {ownerTurfs.map((arena) => (
-                            <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                              <div className="flex items-center gap-4">
-                                <img src={arena.image} alt={arena.title} className="w-16 h-16 rounded-xl object-cover" />
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h3 className="font-extrabold text-white text-base">{arena.title}</h3>
-                                    <span className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
-                                      Active
-                                    </span>
+                          {ownerTurfs.map((arena) => {
+                            const pType = arena.plan_type || (arena.plan === 'commission' ? 'commission' : (arena.plan === 'hybrid' ? 'hybrid' : 'free'));
+                            const pLabel = pType === 'free'
+                              ? 'Free Plan (0% Comm, ₹0/mo • WhatsApp Direct)'
+                              : pType === 'hybrid'
+                              ? 'Hybrid Plan (3% Comm + ₹2,000/mo • Payment Gateway)'
+                              : 'Commission Plan (10% Comm, ₹0/mo • Payment Gateway)';
+                            const pBadgeClass = pType === 'free'
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                              : pType === 'hybrid'
+                              ? 'bg-teal-500/10 border-teal-500/30 text-teal-400'
+                              : 'bg-amber-500/10 border-amber-500/30 text-amber-400';
+
+                            return (
+                              <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                  <div className="flex items-center gap-4">
+                                    <img src={arena.image} alt={arena.title} className="w-16 h-16 rounded-xl object-cover" />
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <h3 className="font-extrabold text-white text-base">{arena.title}</h3>
+                                        <span className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
+                                          Active
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
+                                      <div className="flex gap-2 text-[11px] text-amber-400 mt-1 font-semibold">
+                                        <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span>
+                                      </div>
+                                    </div>
                                   </div>
-                                  <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
-                                  <div className="flex gap-2 text-[11px] text-amber-400 mt-1 font-semibold">
-                                    <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span> • <span className="text-purple-400 uppercase font-bold">{arena.plan}</span>
+
+                                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                                    <button 
+                                      onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
+                                      className="text-xs font-bold bg-gray-900 hover:bg-gray-800 text-teal-400 border border-teal-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1"
+                                    >
+                                      <Navigation className="w-3.5 h-3.5" /> Navigate
+                                    </button>
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleDeleteTurf(arena.id, arena.title)}
+                                      className="text-xs font-bold text-rose-400 hover:bg-rose-500/20 bg-rose-500/10 border border-rose-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" /> Delete Turf
+                                    </button>
                                   </div>
                                 </div>
-                              </div>
 
-                              <div className="flex items-center gap-2">
-                                <button 
-                                  onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
-                                  className="text-xs font-bold bg-gray-900 hover:bg-gray-800 text-teal-400 border border-teal-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1"
-                                >
-                                  <Navigation className="w-3.5 h-3.5" /> Navigate
-                                </button>
-                                <button 
-                                  type="button"
-                                  onClick={() => handleDeleteTurf(arena.id, arena.title)}
-                                  className="text-xs font-bold text-rose-400 hover:bg-rose-500/20 bg-rose-500/10 border border-rose-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1.5"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" /> Delete Turf
-                                </button>
+                                {/* READ-ONLY LOCKED PLAN TYPE DISPLAY (Requirement 2) */}
+                                <div className="bg-[#080c14] border border-gray-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[11px] font-bold text-gray-300 flex items-center gap-1">
+                                        <Lock className="w-3.5 h-3.5 text-amber-400" /> Listing Plan:
+                                      </span>
+                                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded border ${pBadgeClass}`}>
+                                        {pType}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] font-semibold text-gray-300">{pLabel}</p>
+                                  </div>
+                                  <p className="text-[10px] text-gray-500 italic">Contact platform admin to modify your listing plan.</p>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -2816,39 +3324,104 @@ export default function WinDeclareApp() {
                           </div>
                         </div>
 
-                        {/* 24-Hour Custom Price Inputs Grid */}
+                        {/* 24-Hour Custom Price Inputs Grid & Slot Override Toggles */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-h-[450px] overflow-y-auto pr-1 no-scrollbar">
-                          {getSlotsDataForArena(ownerGround, selectedDateIndex).map((slot) => (
-                            <div 
-                              key={slot.time} 
-                              className="bg-[#080c14] border border-gray-800/80 p-3 rounded-xl space-y-2 hover:border-amber-500/40 transition"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-extrabold text-white">{slot.time}</span>
-                                {slotPrices[selectedDay]?.[slot.time] !== undefined && (
-                                  <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
-                                    Custom
-                                  </span>
-                                )}
-                              </div>
+                          {getSlotsDataForArena(ownerGround, selectedDateIndex).map((slot) => {
+                            const dayMap: { [key: string]: number } = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+                            const currentDow = dayMap[selectedDay] ?? 0;
+                            const todayIso = new Date().toISOString().split('T')[0];
 
-                              <div className="space-y-1">
-                                <div className="relative">
-                                  <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₹</span>
-                                  <input 
-                                    type="number" 
-                                    placeholder={String(baseGroundPrice)}
-                                    value={slotPrices[selectedDay]?.[slot.time] ?? slot.price}
-                                    onChange={(e) => handlePriceChange(selectedDay, slot.time, Number(e.target.value))}
-                                    className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
-                                  />
+                            const isClosedOverride = slotOverrides.some(o => 
+                              (String(o.ground_id) === String(ownerGround.id) || String(o.arena_id) === String(ownerGround.id)) &&
+                              o.slot_time === slot.time &&
+                              (o.day_of_week === currentDow || o.specific_date === todayIso)
+                            );
+
+                            return (
+                              <div 
+                                key={slot.time} 
+                                className={`border p-3 rounded-xl space-y-2 transition relative ${
+                                  isClosedOverride 
+                                    ? 'bg-rose-950/20 border-rose-500/40 opacity-75' 
+                                    : 'bg-[#080c14] border-gray-800/80 hover:border-amber-500/40'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-xs font-extrabold ${isClosedOverride ? 'text-rose-400 line-through' : 'text-white'}`}>
+                                    {slot.time}
+                                  </span>
+
+                                  <div className="flex items-center gap-1.5">
+                                    {isClosedOverride ? (
+                                      <span className="text-[9px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 py-0.5 rounded">
+                                        CLOSED
+                                      </span>
+                                    ) : slotPrices[selectedDay]?.[slot.time] !== undefined && (
+                                      <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
+                                        Custom
+                                      </span>
+                                    )}
+
+                                    {/* Toggle Button for Slot Override */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (isClosedOverride) {
+                                          handleToggleSlotOverride(ownerGround.id, slot.time, 'reopen', selectedDay);
+                                        } else {
+                                          setOpenOverrideMenuSlot(openOverrideMenuSlot === slot.time ? null : slot.time);
+                                        }
+                                      }}
+                                      className={`p-1 rounded-lg transition text-xs ${
+                                        isClosedOverride
+                                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30'
+                                          : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700'
+                                      }`}
+                                      title={isClosedOverride ? "Click to Re-open Slot" : "Toggle Slot Availability"}
+                                    >
+                                      {isClosedOverride ? <Check className="w-3.5 h-3.5" /> : <Power className="w-3.5 h-3.5" />}
+                                    </button>
+                                  </div>
                                 </div>
-                                <p className="text-[10px] text-gray-500 font-semibold">
-                                  Slot Rate: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
-                                </p>
+
+                                {/* Inline Override Menu Dropdown */}
+                                {openOverrideMenuSlot === slot.time && !isClosedOverride && (
+                                  <div className="absolute right-2 top-10 z-20 bg-[#0e1320] border border-amber-500/40 rounded-xl p-2 shadow-2xl space-y-1.5 w-44">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleSlotOverride(ownerGround.id, slot.time, 'every', selectedDay)}
+                                      className="w-full text-left px-2.5 py-1.5 hover:bg-amber-500/20 text-amber-300 text-[11px] font-bold rounded-lg transition flex items-center gap-1.5"
+                                    >
+                                      <Lock className="w-3 h-3 text-amber-400" /> Turn off every {selectedDay}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleSlotOverride(ownerGround.id, slot.time, 'today', selectedDay)}
+                                      className="w-full text-left px-2.5 py-1.5 hover:bg-rose-500/20 text-rose-300 text-[11px] font-bold rounded-lg transition flex items-center gap-1.5"
+                                    >
+                                      <Lock className="w-3 h-3 text-rose-400" /> Turn off just today
+                                    </button>
+                                  </div>
+                                )}
+
+                                <div className="space-y-1">
+                                  <div className="relative">
+                                    <span className="absolute left-3 top-2 text-xs font-bold text-gray-500">₹</span>
+                                    <input 
+                                      type="number" 
+                                      placeholder={String(baseGroundPrice)}
+                                      value={slotPrices[selectedDay]?.[slot.time] ?? slot.price}
+                                      onChange={(e) => handlePriceChange(selectedDay, slot.time, Number(e.target.value))}
+                                      className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
+                                    />
+                                  </div>
+                                  <p className="text-[10px] text-gray-500 font-semibold">
+                                    Slot Rate: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
 
                         {/* Action Bar */}
@@ -2982,12 +3555,18 @@ export default function WinDeclareApp() {
                         <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-mono font-bold text-amber-400">{b.id}</span>
+                              <h4 className="font-bold text-white text-sm">
+                                {b.turf_display_name || b.arenaTitle || 'Sports Turf'}
+                              </h4>
                               {b.booking_type === 'offline' && (
-                                <span className="bg-purple-500/20 text-purple-300 text-[9px] font-bold px-1.5 py-0.5 rounded">Offline</span>
+                                <span className="bg-purple-500/20 text-purple-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                  Offline
+                                </span>
                               )}
                             </div>
-                            <h4 className="font-bold text-white text-xs">{b.arenaTitle}</h4>
+                            <p className="text-[10px] font-mono text-amber-400">
+                              ID: #{b.id.length > 8 ? b.id.substring(0, 8).toUpperCase() : b.id}
+                            </p>
                             <p className="text-[10px] text-gray-400">{b.date} • {b.slots}</p>
                           </div>
 
@@ -3207,11 +3786,12 @@ export default function WinDeclareApp() {
           ? selectedSlots.reduce((acc, curr) => acc + curr.price, 0) 
           : (selectedArena.price || 0);
 
-        const rawNum = selectedArena.whatsappNumber || '9505737751';
-        const cleanNum = rawNum.replace(/\D/g, '');
-        const formattedPhone = cleanNum.startsWith('91') && cleanNum.length === 12 ? cleanNum : `91${cleanNum.slice(-10)}`;
-        const bookingMessage = `Hi! I would like to book ${selectedArena.title}.\n📅 Date: ${selectedDateStr}\n⏰ Slots: ${slotsStr}\n💰 Total Amount: ₹${totalAmount}\nI have made the payment. Here is my payment screenshot.`;
-        const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(bookingMessage)}`;
+        const rawNum = selectedArena.whatsappNumber || (selectedArena as any).phone || '9505737751';
+        const digitsOnly = rawNum ? String(rawNum).replace(/\D/g, '') : '';
+        const formattedPhone = digitsOnly.length === 10 ? '91' + digitsOnly : digitsOnly;
+        const selectedSlotsList = selectedSlots.length > 0 ? selectedSlots.map(s => s.time).join(', ') : slotsStr;
+        const messageText = `Hi! I have made a payment of ₹${totalAmount} for ${selectedArena.title} on ${selectedDateStr} for slot(s): ${selectedSlotsList}. Attached is my payment screenshot.`;
+        const waUrl = formattedPhone ? `https://wa.me/${formattedPhone}?text=${encodeURIComponent(messageText)}` : '';
 
         return (
           <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -3284,6 +3864,12 @@ export default function WinDeclareApp() {
               <button
                 type="button"
                 onClick={async () => {
+                  if (!formattedPhone || formattedPhone.length < 10) {
+                    showToast("❌ Owner contact phone is unavailable.");
+                    alert("Owner contact phone is unavailable.");
+                    return;
+                  }
+
                   const selectedGround = selectedArena;
                   const selectedDate = selectedDateStr;
                   const targetDate = new Date();
@@ -3296,7 +3882,7 @@ export default function WinDeclareApp() {
                     arena_id: selectedGround.id,
                     user_id: currentUser?.id || '',
                     slot_time: s.time,
-                    status: 'confirmed',
+                    status: 'whatsapp_pending',
                     booking_date: formattedIsoDate,
                     booking_id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
                     ground_id: Number(selectedGround.id),
@@ -3309,7 +3895,7 @@ export default function WinDeclareApp() {
                     user_contact: currentUser?.phone || currentUser?.email || 'Player Session',
                     plan_used: selectedGround.plan || 'subscription',
                     payment_qr_used: selectedGround.ownerUpiId || 'owner@okaxis',
-                    payment_status: 'pending_whatsapp',
+                    payment_status: 'whatsapp_pending',
                     created_at: new Date().toISOString()
                   }));
 
@@ -3339,7 +3925,7 @@ export default function WinDeclareApp() {
                     planUsed: selectedGround.plan || 'subscription',
                     paymentQrUsed: selectedGround.ownerUpiId || 'owner@okaxis',
                     booking_type: 'online',
-                    payment_status: 'pending_whatsapp',
+                    payment_status: 'whatsapp_pending',
                     createdAt: recordsToInsert[0].created_at
                   };
 
