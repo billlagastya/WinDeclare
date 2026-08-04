@@ -12,6 +12,7 @@ import {
 
 import { supabase } from '@/lib/supabaseClient';
 import { initiateOnlinePayment } from '@/lib/payment';
+import Footer from '@/components/Footer';
 
 interface Arena {
   id: number | string;
@@ -210,6 +211,7 @@ export default function WinDeclareApp() {
 
   // Payment Gateway Modal
   const [showPaymentModal, setShowPaymentModal] = useState<boolean>(false);
+  const [showRefundNoticeModal, setShowRefundNoticeModal] = useState<boolean>(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'upi' | 'card' | 'netbanking'>('upi');
   const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
 
@@ -1250,6 +1252,14 @@ export default function WinDeclareApp() {
       return;
     }
 
+    if (!selectedArena) return;
+
+    // Show Cancellation Policy Notice Modal before payment
+    setShowRefundNoticeModal(true);
+  };
+
+  const handleConfirmRefundNoticeAndPay = async () => {
+    setShowRefundNoticeModal(false);
     if (!selectedArena) return;
 
     const planType = selectedArena.plan_type || (selectedArena.plan === 'commission' ? 'commission' : (selectedArena.plan === 'hybrid' ? 'hybrid' : 'free'));
@@ -4043,33 +4053,48 @@ export default function WinDeclareApp() {
         </div>
       )}
 
-      {/* Footer */}
-      <footer className="w-full border-t border-gray-800 bg-black text-gray-400 py-6 px-4">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-center md:text-left">
-          <div>
-            <p className="font-semibold text-white text-base flex items-center justify-center md:justify-start gap-2">
-              <span className="bg-amber-500 p-1 rounded text-black inline-flex items-center">
-                <Trophy className="w-4 h-4 fill-black stroke-black" />
-              </span>
-              WinDeclare
-            </p>
-            <p className="text-xs text-gray-400 mt-1">
-              Operated by: <span className="text-gray-200 font-medium">KONDRA SHRAVAN KUMAR</span> (Sole Proprietorship)
-            </p>
-          </div>
-          <div className="text-xs text-gray-500 flex flex-col items-center md:items-end gap-2">
-            <div className="flex gap-6 font-semibold text-gray-400 mb-1">
-              <a href="#terms" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Terms of Service</a>
-              <a href="#privacy" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Privacy Policy</a>
-              <a href="#admin" onClick={(e) => { e.preventDefault(); handleOpenAdminDashboard(); }} className="hover:text-purple-400 text-gray-600">Admin Entrance</a>
+      {/* CANCELLATION POLICY NOTICE MODAL (BOOKMYSHOW STYLE) */}
+      {showRefundNoticeModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#161b22] border border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold text-white">Cancellation Policy Notice</h3>
+                <p className="text-xs text-amber-400 font-medium">Please review before proceeding</p>
+              </div>
             </div>
-            <p>© {new Date().getFullYear()} WinDeclare. All rights reserved.</p>
-            <p className="mt-1">
-              Legal Entity Name: KONDRA SHRAVAN KUMAR
-            </p>
+
+            <div className="bg-[#080c14] border border-gray-800 rounded-xl p-4 mb-6">
+              <p className="text-xs text-gray-300 leading-relaxed">
+                Bookings for this venue are <strong className="text-amber-400">NON-REFUNDABLE</strong> once confirmed unless specified otherwise by the venue owner. Are you sure you want to proceed?
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowRefundNoticeModal(false)}
+                className="flex-1 py-3 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 font-bold text-xs rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRefundNoticeAndPay}
+                className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/20"
+              >
+                Proceed to Pay
+              </button>
+            </div>
           </div>
         </div>
-      </footer>
+      )}
+
+      {/* Footer */}
+      <Footer onOpenAdmin={handleOpenAdminDashboard} />
     </div>
   );
 }
