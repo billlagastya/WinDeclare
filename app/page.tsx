@@ -4044,20 +4044,29 @@ export default function WinDeclareApp() {
       )}
 
       {/* Footer */}
-      <footer className="border-t border-gray-800 bg-[#0a0e17] py-8 text-xs text-gray-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="bg-amber-500 p-1.5 rounded-lg text-black">
-              <Trophy className="w-4 h-4 fill-black stroke-black" />
-            </div>
-            <span className="font-bold text-white text-sm">WinDeclare</span>
-            <span>© 2026 WinDeclare Sports Technologies Pvt Ltd. All rights reserved.</span>
+      <footer className="w-full border-t border-gray-800 bg-black text-gray-400 py-6 px-4">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-center md:text-left">
+          <div>
+            <p className="font-semibold text-white text-base flex items-center justify-center md:justify-start gap-2">
+              <span className="bg-amber-500 p-1 rounded text-black inline-flex items-center">
+                <Trophy className="w-4 h-4 fill-black stroke-black" />
+              </span>
+              WinDeclare
+            </p>
+            <p className="text-xs text-gray-400 mt-1">
+              Operated by: <span className="text-gray-200 font-medium">KONDRA SHRAVAN KUMAR</span> (Sole Proprietorship)
+            </p>
           </div>
-
-          <div className="flex gap-6 font-semibold">
-            <a href="#terms" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Terms of Service</a>
-            <a href="#privacy" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Privacy Policy</a>
-            <a href="#admin" onClick={(e) => { e.preventDefault(); handleOpenAdminDashboard(); }} className="hover:text-purple-400 text-gray-600">Admin Entrance</a>
+          <div className="text-xs text-gray-500 flex flex-col items-center md:items-end gap-2">
+            <div className="flex gap-6 font-semibold text-gray-400 mb-1">
+              <a href="#terms" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Terms of Service</a>
+              <a href="#privacy" onClick={(e) => e.preventDefault()} className="hover:text-amber-400">Privacy Policy</a>
+              <a href="#admin" onClick={(e) => { e.preventDefault(); handleOpenAdminDashboard(); }} className="hover:text-purple-400 text-gray-600">Admin Entrance</a>
+            </div>
+            <p>© {new Date().getFullYear()} WinDeclare. All rights reserved.</p>
+            <p className="mt-1">
+              Legal Entity Name: KONDRA SHRAVAN KUMAR
+            </p>
           </div>
         </div>
       </footer>
