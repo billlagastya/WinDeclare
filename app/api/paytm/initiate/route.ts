@@ -86,10 +86,12 @@ export async function POST(request: Request) {
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (origin && origin.startsWith('http') ? origin : 'https://win-declare.vercel.app');
     const callbackUrl = `${baseUrl}/api/paytm/callback`;
 
+    const websiteName = (paytmEnv === 'STAGE' || paytmEnv === 'STAGING') ? 'WEBSTAGING' : (website || 'DEFAULT');
+
     const bodyObj = {
       requestType: "Payment",
       mid: mid,
-      websiteName: website,
+      websiteName: websiteName,
       orderId: orderId,
       callbackUrl: callbackUrl,
       txnAmount: {
