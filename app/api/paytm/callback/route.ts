@@ -24,7 +24,12 @@ const isUuid = (str: string) =>
 
 export async function POST(request: Request) {
   try {
-    console.log("SERVICE_ROLE_KEY_PRESENT:", !!process.env.SUPABASE_SERVICE_ROLE_KEY, "LENGTH:", (process.env.SUPABASE_SERVICE_ROLE_KEY || '').length);
+    console.log({
+      SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      SERVICE_ROLE_KEY_PRESENT: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      SERVICE_ROLE_KEY_LENGTH: process.env.SUPABASE_SERVICE_ROLE_KEY?.length
+    });
+
     // Safely parse incoming data as URLSearchParams or FormData
     const text = await request.text();
     const searchParams = new URLSearchParams(text);
@@ -43,6 +48,14 @@ export async function POST(request: Request) {
 
     // 1. Await DB update strictly first
     if (orderId) {
+      const { data: before, error: beforeError } = await supabaseAdmin
+        .from('bookings')
+        .select('*')
+        .eq('booking_id', orderId);
+
+      console.log('=== BEFORE UPDATE ===');
+      console.log({ orderId, beforeError, before });
+
       if (isSuccess) {
         let query = supabaseAdmin
           .from('bookings')
@@ -57,11 +70,13 @@ export async function POST(request: Request) {
           query = query.eq('booking_id', orderId);
         }
 
-        const { data, error: dbError } = await query.select();
-        console.log("CALLBACK DB UPDATE RESULT:", { orderId, error: dbError, data });
+        const { data, error } = await query.select();
 
-        if (dbError) {
-          console.error("Supabase booking update error in callback:", dbError);
+        console.log('=== UPDATE RESULT ===');
+        console.log({ data, error });
+
+        if (error) {
+          console.error("Supabase booking update error in callback:", error);
         }
       } else {
         console.log("Payment unsuccessful or cancelled:", params.RESPMSG);
@@ -79,13 +94,23 @@ export async function POST(request: Request) {
           query = query.eq('booking_id', orderId);
         }
 
-        const { data, error: dbError } = await query.select();
-        console.log("CALLBACK DB CANCEL RESULT:", { orderId, error: dbError, data });
+        const { data, error } = await query.select();
 
-        if (dbError) {
-          console.error("Supabase booking cancel error in callback:", dbError);
+        console.log('=== UPDATE RESULT ===');
+        console.log({ data, error });
+
+        if (error) {
+          console.error("Supabase booking cancel error in callback:", error);
         }
       }
+
+      const { data: after, error: afterError } = await supabaseAdmin
+        .from('bookings')
+        .select('*')
+        .eq('booking_id', orderId);
+
+      console.log('=== AFTER UPDATE ===');
+      console.log({ afterError, after });
     }
 
     // 2. Only THEN construct and return the redirect
