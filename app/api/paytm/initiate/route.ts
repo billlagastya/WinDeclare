@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
-// @ts-ignore
-import PaytmChecksum from 'paytmchecksum';
+import { PaytmChecksum } from '@/lib/paytmchecksum';
 
 export async function POST(request: Request) {
   try {
