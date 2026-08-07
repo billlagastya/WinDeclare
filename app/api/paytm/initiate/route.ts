@@ -82,8 +82,9 @@ export async function POST(request: Request) {
     const orderId = booking_id || `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const customerId = customer_details?.customer_id || `CUST_${Date.now()}`;
 
-    const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const callbackUrl = `${origin}/api/paytm/callback`;
+    const origin = request.headers.get('origin');
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (origin && origin.startsWith('http') ? origin : 'https://win-declare.vercel.app');
+    const callbackUrl = `${baseUrl}/api/paytm/callback`;
 
     const bodyObj = {
       requestType: "Payment",

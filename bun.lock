@@ -12,6 +12,7 @@
         "firebase": "^12.16.0",
         "lucide-react": "^1.27.0",
         "next": "16.2.12",
+        "paytmchecksum": "^1.5.1",
         "react": "19.2.4",
         "react-dom": "19.2.4",
         "require-in-the-middle": "^8.0.1",
@@ -1295,6 +1296,8 @@
     "path-to-regexp-updated": ["path-to-regexp@6.3.0", "", {}, "sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ=="],
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
+
+    "paytmchecksum": ["paytmchecksum@1.5.1", "", {}, "sha512-RnimtEcnP3b7FiakPYkyO416UubaUflG5e2HlM2UYhryZ9wXwoRZ5k8XEK4wxaK+d7qIzWDMFUo1LICgaU+J0A=="],
 
     "pcre-to-regexp": ["pcre-to-regexp@1.1.0", "", {}, "sha512-KF9XxmUQJ2DIlMj3TqNqY1AWvyvTuIuq11CuuekxyaYMiFuMKGgQrePYMX5bXKLhLG3sDI4CsGAYHPaT7VV7+g=="],
 

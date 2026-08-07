@@ -79,6 +79,15 @@ interface Profile {
   role?: string;
 }
 
+const getYYYYMMDD = (dateIndex: number = 0): string => {
+  const d = new Date();
+  d.setDate(d.getDate() + dateIndex);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const parseSlotTimeToHour = (timeStr: string): number => {
   const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (!match) return 0;
@@ -87,6 +96,17 @@ const parseSlotTimeToHour = (timeStr: string): number => {
   if (period === 'PM' && hour < 12) hour += 12;
   if (period === 'AM' && hour === 12) hour = 0;
   return hour;
+};
+
+const normalizeTimeString = (timeStr: string): string => {
+  if (!timeStr) return '';
+  const trimmed = timeStr.trim();
+  const match = trimmed.match(/^0?(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return trimmed;
+  const hour = parseInt(match[1], 10);
+  const min = match[2];
+  const period = match[3].toUpperCase();
+  return `${hour}:${min} ${period}`;
 };
 
 export default function WinDeclareApp() {
@@ -527,21 +547,7 @@ export default function WinDeclareApp() {
     };
   }, []);
 
-  // Handle Return Redirect & Hash Navigation from Cashfree Payment Checkout
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const urlParams = new URLSearchParams(window.location.search);
-    const bookingParam = urlParams.get('booking') || urlParams.get('order_id');
-    const hash = window.location.hash;
 
-    if (bookingParam || hash === '#profile-bookings') {
-      setProfileTab('bookings');
-      setView('profile');
-      if (bookingParam) {
-        showToast(`🎉 Cashfree Payment processing completed for order ${bookingParam}!`);
-      }
-    }
-  }, []);
 
   // Fetch initial bookings from Supabase & hydrate locked slots across page refreshes
   useEffect(() => {
@@ -550,6 +556,7 @@ export default function WinDeclareApp() {
         const { data, error } = await supabase
           .from('bookings')
           .select('*')
+          .in('status', ['confirmed', 'booked'])
           .order('created_at', { ascending: false });
         console.log("DEBUG FIRST ARENA OBJECT:", arenas[0]);
         console.log("DEBUG FIRST BOOKING OBJECT:", data?.[0]);
@@ -626,25 +633,44 @@ export default function WinDeclareApp() {
   // Fetch Slot Availability for selected arena & date (Player View & Refresh)
   const fetchSlotAvailability = useCallback(async (arenaId: number | string, dateIndex: number) => {
     if (!arenaId) return;
+    const selectedDate = getYYYYMMDD(dateIndex);
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + dateIndex);
-    const selectedDate = targetDate.toISOString().split('T')[0];
     const dow = targetDate.getDay();
     const isUuid = typeof arenaId === 'string' && arenaId.includes('-');
 
+    console.log("Fetching bookings for ground:", arenaId, "on date:", selectedDate);
+
     try {
-      let query = supabase.from('bookings').select('slots').eq('booking_date', selectedDate);
-      query = isUuid ? query.eq('ground_id', arenaId) : query.eq('arena_id', Number(arenaId));
+      let query = supabase
+        .from('bookings')
+        .select('slots, arena_id, ground_id')
+        .eq('booking_date', selectedDate)
+        .in('status', ['confirmed', 'booked']);
+
+      if (isUuid) {
+        query = query.eq('ground_id', arenaId);
+      } else {
+        query = query.or(`arena_id.eq.${Number(arenaId)},ground_id.eq.${arenaId}`);
+      }
+
       const { data } = await query;
 
       const bookedEntries: { time: string; source: 'booking' }[] = [];
       if (data) {
         data.forEach((row: any) => {
+          let slotsArr: string[] = [];
           if (Array.isArray(row.slots)) {
-            row.slots.forEach((t: string) => {
-              if (t && !bookedEntries.some(e => e.time === t)) bookedEntries.push({ time: t, source: 'booking' });
-            });
+            slotsArr = row.slots.map((s: any) => typeof s === 'string' ? s : s.time);
+          } else if (typeof row.slots === 'string') {
+            slotsArr = row.slots.split(',').map((s: string) => s.trim());
           }
+          slotsArr.forEach((t: string) => {
+            const norm = normalizeTimeString(t);
+            if (norm && !bookedEntries.some(e => e.time === norm)) {
+              bookedEntries.push({ time: norm, source: 'booking' });
+            }
+          });
         });
       }
 
@@ -657,8 +683,8 @@ export default function WinDeclareApp() {
       const closedEntries: { time: string; source: 'override' }[] = [];
       if (overrides) {
         overrides.forEach((row: any) => {
-          const t = row.slot_time?.trim();
-          if (t && !closedEntries.some(e => e.time === t)) closedEntries.push({ time: t, source: 'override' });
+          const norm = normalizeTimeString(row.slot_time);
+          if (norm && !closedEntries.some(e => e.time === norm)) closedEntries.push({ time: norm, source: 'override' });
         });
       }
 
@@ -677,6 +703,35 @@ export default function WinDeclareApp() {
   useEffect(() => {
     if (selectedArena?.id !== undefined && selectedArena?.id !== null) {
       fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+    }
+  }, [selectedArena?.id, selectedDateIndex, fetchSlotAvailability]);
+
+  // Handle Return Redirect & Hash Navigation from Paytm / Cashfree Payment Checkout
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const bookingParam = urlParams.get('booking') || urlParams.get('order_id');
+    const statusParam = urlParams.get('status');
+    const msgParam = urlParams.get('msg');
+    const hash = window.location.hash;
+
+    if (bookingParam || hash === '#profile-bookings') {
+      setProfileTab('bookings');
+      setView('profile');
+      if (bookingParam) {
+        if (statusParam === 'success') {
+          showToast(`🎉 Paytm Payment successful for order ${bookingParam}!`);
+        } else if (statusParam === 'failed') {
+          showToast(`❌ Paytm Payment failed: ${msgParam || 'Transaction cancelled or declined'}`);
+        } else {
+          showToast(`🎉 Payment processing completed for order ${bookingParam}!`);
+        }
+
+        // Auto-refresh slot availability and profile bookings on payment return
+        if (selectedArena?.id !== undefined && selectedArena?.id !== null) {
+          fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+        }
+      }
     }
   }, [selectedArena?.id, selectedDateIndex, fetchSlotAvailability]);
 
@@ -910,7 +965,7 @@ export default function WinDeclareApp() {
   const datesList = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
-    return { day: dayNames[d.getDay()], date: String(d.getDate()) };
+    return { day: dayNames[d.getDay()], date: String(d.getDate()), isoDate: getYYYYMMDD(i) };
   });
 
   // Dynamic Time Slot Pricing Generator (renders prices using ground.price_per_hour or specific pricing_rules[day][slotTime])
@@ -1109,9 +1164,7 @@ export default function WinDeclareApp() {
     if (!selectedArena || !currentUser) return;
     const activeDate = datesList[selectedDateIndex];
     const selectedDateStr = activeDate ? `${activeDate.day}, Jul ${activeDate.date}` : 'Today';
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + selectedDateIndex);
-    const formattedIsoDate = targetDate.toISOString().split('T')[0];
+    const formattedIsoDate = getYYYYMMDD(selectedDateIndex);
 
     const slotsStr = selectedSlots.map(s => s.time).join(', ');
     const totalAmount = totalPrice;
@@ -1142,11 +1195,21 @@ export default function WinDeclareApp() {
     try {
       const { error } = await supabase.from('bookings').insert(recordsToInsert);
       if (error) {
-        console.error("Direct WhatsApp Insert Failed Message:", error.message);
-        console.error("Direct WhatsApp Insert Failed Raw:", JSON.stringify(error, null, 2));
+        if (error.code === '23505') {
+          showToast('❌ Sorry, this slot was just booked by someone else. Please pick another.');
+        } else {
+          console.error("Direct WhatsApp Insert Failed Message:", error.message);
+          showToast('❌ Could not complete booking. Please try again.');
+        }
+        fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+        return;
       }
+      // Refresh slot availability immediately on successful insert too
+      fetchSlotAvailability(selectedArena.id, selectedDateIndex);
     } catch (err: any) {
       console.error("Booking insert exception:", err);
+      showToast('❌ Could not complete booking. Please try again.');
+      return;
     }
 
     const generatedBookingId = `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
@@ -1186,9 +1249,7 @@ export default function WinDeclareApp() {
 
     const activeDate = datesList[selectedDateIndex];
     const selectedDateStr = activeDate ? `${activeDate.day}, Jul ${activeDate.date}` : 'Today';
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + selectedDateIndex);
-    const formattedIsoDate = targetDate.toISOString().split('T')[0];
+    const formattedIsoDate = getYYYYMMDD(selectedDateIndex);
 
     const slotsStr = selectedSlots.map(s => s.time).join(', ');
     const totalAmount = totalPrice;
@@ -1229,14 +1290,20 @@ export default function WinDeclareApp() {
     }
 
     // Invoke modular payment gateway adapter
-    await initiateOnlinePayment({
+    const paymentRes = await initiateOnlinePayment({
       amount: totalAmount,
       bookingId: generatedBookingId,
       customerName: currentUser.name || 'Player',
       customerPhone: currentUser.phone || '9999999999',
       customerEmail: currentUser.email || '',
-      groundId: selectedArena.id
+      groundId: selectedArena.id,
+      bookingDate: formattedIsoDate,
+      slots: selectedSlots.map(s => s.time)
     });
+
+    if (paymentRes && !paymentRes.success && paymentRes.error) {
+      showToast(`❌ Paytm Notice: ${paymentRes.error}`);
+    }
   };
 
   // STRICT GATEKEEPER: Check authentication & plan_type before opening checkout
@@ -1253,6 +1320,51 @@ export default function WinDeclareApp() {
     }
 
     if (!selectedArena) return;
+
+    // Preventative Double-Booking Validation
+    const targetDateStr = getYYYYMMDD(selectedDateIndex);
+    const selectedTimeStrings = selectedSlots.map(s => s.time);
+    const isUuid = typeof selectedArena.id === 'string' && selectedArena.id.includes('-');
+
+    try {
+      let query = supabase
+        .from('bookings')
+        .select('slots')
+        .eq('booking_date', targetDateStr)
+        .in('status', ['confirmed', 'booked']);
+
+      if (isUuid) {
+        query = query.eq('ground_id', selectedArena.id);
+      } else {
+        query = query.or(`arena_id.eq.${Number(selectedArena.id)},ground_id.eq.${selectedArena.id}`);
+      }
+
+      const { data: activeBookings } = await query;
+      if (activeBookings && activeBookings.length > 0) {
+        const takenSlots = new Set<string>();
+        activeBookings.forEach((b: any) => {
+          let bSlots: string[] = [];
+          if (Array.isArray(b.slots)) {
+            bSlots = b.slots.map((s: any) => typeof s === 'string' ? s : s.time);
+          } else if (typeof b.slots === 'string') {
+            bSlots = b.slots.split(',').map((s: string) => s.trim());
+          }
+          bSlots.forEach((s: string) => {
+            if (s) takenSlots.add(s);
+          });
+        });
+
+        const hasConflict = selectedTimeStrings.some(s => takenSlots.has(s));
+        if (hasConflict) {
+          alert('Slot already booked by another user.');
+          showToast('❌ Slot already booked by another user.');
+          fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("Double-booking pre-check error:", e);
+    }
 
     // Show Cancellation Policy Notice Modal before payment
     setShowRefundNoticeModal(true);
@@ -1667,7 +1779,7 @@ export default function WinDeclareApp() {
   };
 
   return (
-    <div className="min-h-screen bg-[#070b12] text-gray-100 font-sans antialiased flex flex-col justify-between selection:bg-amber-500 selection:text-black">
+    <div className="min-h-screen bg-[#070b12] text-gray-100 font-sans antialiased flex flex-col justify-between selection:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] selection:text-black">
       {/* Recaptcha Container for Firebase Phone Auth */}
       <div id="recaptcha-container"></div>
 
@@ -1689,11 +1801,11 @@ export default function WinDeclareApp() {
                 <button
                   type="button"
                   onClick={() => setIsOwnerDrawerOpen(true)}
-                  className="p-2 rounded-xl bg-gray-900 border border-gray-800 text-amber-400 hover:bg-gray-800 transition flex items-center gap-1.5"
+                  className="p-2 rounded-xl bg-gray-900 border border-gray-800 text-[#EC4899] hover:bg-gray-800 transition flex items-center gap-1.5"
                   title="Open Owner Navigation Drawer"
                 >
-                  <Menu className="w-5 h-5 text-amber-400" />
-                  <span className="text-xs font-bold text-amber-400 hidden sm:inline">Menu</span>
+                  <Menu className="w-5 h-5 text-[#EC4899]" />
+                  <span className="text-xs font-bold text-[#EC4899] hidden sm:inline">Menu</span>
                 </button>
               )}
 
@@ -1701,15 +1813,13 @@ export default function WinDeclareApp() {
                 className="flex items-center gap-2 cursor-pointer group"
                 onClick={() => setView('browse')}
               >
-                <div className="bg-gradient-to-tr from-amber-500 to-orange-500 p-2 rounded-xl text-black shadow-lg shadow-amber-500/20 group-hover:scale-105 transition duration-300">
-                  <Trophy className="w-5 h-5 fill-black stroke-black" />
-                </div>
+                <img src="/logo.png" alt="WinDeclare" className="w-9 h-9 object-contain group-hover:scale-105 transition duration-300" />
                 <div className="flex items-center gap-2">
-                  <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-amber-400 transition">
+                  <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-[#EC4899] transition">
                     WinDeclare
                   </span>
                   {view === 'owner-portal' && (
-                    <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-lg uppercase tracking-wider">
+                    <span className="text-[10px] font-extrabold text-[#EC4899] bg-pink-500/10 border border-pink-500/30 px-2 py-0.5 rounded-lg uppercase tracking-wider">
                       OWNER PORTAL
                     </span>
                   )}
@@ -1722,7 +1832,7 @@ export default function WinDeclareApp() {
               <button 
                 onClick={() => setView('browse')}
                 className={`text-xs font-semibold px-3 py-2 rounded-xl transition ${
-                  view === 'browse' ? 'bg-amber-500 text-black font-bold' : 'text-gray-300 hover:text-white'
+                  view === 'browse' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-bold' : 'text-gray-300 hover:text-white'
                 }`}
               >
                 Browse Turfs
@@ -1732,9 +1842,9 @@ export default function WinDeclareApp() {
               <div className="relative">
                 <button 
                   onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                  className="flex items-center gap-2 text-xs font-semibold text-gray-300 bg-gray-900 border border-gray-800 px-3 py-2 rounded-xl hover:border-amber-500/50 transition"
+                  className="flex items-center gap-2 text-xs font-semibold text-gray-300 bg-gray-900 border border-gray-800 px-3 py-2 rounded-xl hover:border-pink-500/50 transition"
                 >
-                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black flex items-center justify-center text-[10px]">
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[#0EA5E9] to-[#EC4899] text-black font-black flex items-center justify-center text-[10px]">
                     {currentUser ? currentUser.name.charAt(0) : <User className="w-3.5 h-3.5" />}
                   </div>
                   <span className="hidden sm:inline font-bold">{currentUser ? currentUser.name : 'Account'}</span>
@@ -1751,15 +1861,15 @@ export default function WinDeclareApp() {
 
                     <button 
                       onClick={() => { setProfileTab('bookings'); setView('profile'); setIsProfileMenuOpen(false); }}
-                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 rounded-xl transition"
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 hover:bg-pink-500/10 hover:text-[#EC4899] rounded-xl transition"
                     >
                       <span className="flex items-center gap-2"><Calendar className="w-3.5 h-3.5" /> My Bookings</span>
-                      <span className="bg-amber-500 text-black font-black text-[10px] px-1.5 rounded-full">{myBookings.length}</span>
+                      <span className="bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-black text-[10px] px-1.5 rounded-full">{myBookings.length}</span>
                     </button>
 
                     <button 
                       onClick={() => { setProfileTab('favorites'); setView('profile'); setIsProfileMenuOpen(false); }}
-                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 rounded-xl transition"
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 hover:bg-pink-500/10 hover:text-[#EC4899] rounded-xl transition"
                     >
                       <span className="flex items-center gap-2"><Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> Favorite Turfs</span>
                       <span className="text-gray-400 text-[10px]">{favoriteArenaIds.length}</span>
@@ -1783,18 +1893,18 @@ export default function WinDeclareApp() {
                         }
                         setIsProfileMenuOpen(false);
                       }}
-                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition"
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold text-[#EC4899] bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/30 rounded-xl transition"
                     >
                       <span className="flex items-center gap-2">
-                        <Building2 className="w-3.5 h-3.5 text-amber-400" /> 
+                        <Building2 className="w-3.5 h-3.5 text-[#EC4899]" /> 
                         {view === 'owner-portal' ? 'Switch to Player View' : 'Switch to Owner Portal'}
                       </span>
-                      <ChevronDown className="w-3 h-3 text-amber-400 -rotate-90" />
+                      <ChevronDown className="w-3 h-3 text-[#EC4899] -rotate-90" />
                     </button>
 
                     <button 
                       onClick={() => { setProfileTab('account'); setView('profile'); setIsProfileMenuOpen(false); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-amber-500/10 hover:text-amber-400 rounded-xl transition"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-pink-500/10 hover:text-[#EC4899] rounded-xl transition"
                     >
                       <Settings className="w-3.5 h-3.5" /> Account Settings
                     </button>
@@ -1844,7 +1954,7 @@ export default function WinDeclareApp() {
             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-bold text-amber-500 tracking-widest uppercase bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-md">
+                  <span className="text-xs font-bold text-[#EC4899] tracking-widest uppercase bg-pink-500/10 border border-pink-500/20 px-2.5 py-1 rounded-md">
                     ⚡ Instant Confirmation
                   </span>
 
@@ -1856,7 +1966,7 @@ export default function WinDeclareApp() {
                 </div>
 
                 <h1 className="text-3xl sm:text-4xl font-extrabold text-white">
-                  Find the perfect <span className="text-amber-400">turf</span> near you.
+                  Find the perfect <span className="text-[#EC4899]">turf</span> near you.
                 </h1>
                 <p className="text-gray-400 text-xs sm:text-sm mt-1">
                   Book 5-a-side grounds, box cricket pitches, and badminton courts with instant confirmation.
@@ -1874,7 +1984,7 @@ export default function WinDeclareApp() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search by arena name, location (e.g. Addagutta, Gachibowli)..." 
-                    className="w-full bg-[#070b12] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 text-white"
+                    className="w-full bg-[#070b12] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-[#EC4899] text-white"
                   />
                 </div>
 
@@ -1887,9 +1997,9 @@ export default function WinDeclareApp() {
                     step="100" 
                     value={maxPrice} 
                     onChange={(e) => setMaxPrice(Number(e.target.value))}
-                    className="accent-amber-500 cursor-pointer"
+                    className="accent-[#EC4899] cursor-pointer"
                   />
-                  <span className="text-sm font-bold text-amber-400 min-w-[80px]">₹{maxPrice}/hr</span>
+                  <span className="text-sm font-bold text-[#EC4899] min-w-[80px]">₹{maxPrice}/hr</span>
                 </div>
               </div>
 
@@ -1901,7 +2011,7 @@ export default function WinDeclareApp() {
                     onClick={() => setSelectedSport(sport)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
                       selectedSport === sport
-                        ? 'bg-amber-500 text-black font-extrabold shadow-md'
+                        ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold shadow-md'
                         : 'bg-[#080c14] border border-gray-800 text-gray-400 hover:text-white'
                     }`}
                   >
@@ -1923,7 +2033,7 @@ export default function WinDeclareApp() {
                   const isFav = favoriteArenaIds.includes(Number(arena.id));
 
                   return (
-                    <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-amber-500/40 transition flex flex-col justify-between shadow-xl group">
+                    <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-pink-500/40 transition flex flex-col justify-between shadow-xl group">
                       <div>
                         <div className="relative h-48 bg-gray-950 overflow-hidden">
                           <img src={arena.image} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
@@ -1937,28 +2047,28 @@ export default function WinDeclareApp() {
                           </button>
 
                           {distance && (
-                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-amber-500/40 text-amber-400 text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
-                              <Navigation className="w-3 h-3 fill-amber-400" /> {distance} km away
+                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-pink-500/40 text-[#EC4899] text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                              <Navigation className="w-3 h-3 fill-[#EC4899]" /> {distance} km away
                             </div>
                           )}
 
-                          <div className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-bold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1">
-                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" /> {arena.rating} ({arena.reviews})
+                          <div className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-bold text-[#EC4899] px-2.5 py-1 rounded-md flex items-center gap-1">
+                            <Star className="w-3.5 h-3.5 fill-[#EC4899] text-[#EC4899]" /> {arena.rating} ({arena.reviews})
                           </div>
 
                         </div>
 
                         <div className="p-5 flex-1 flex flex-col justify-between space-y-2">
                           <div>
-                            <h3 className="font-bold text-lg text-white group-hover:text-amber-400 transition">{arena.title}</h3>
+                            <h3 className="font-bold text-lg text-white group-hover:text-[#EC4899] transition">{arena.title}</h3>
                             <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
-                              <MapPin className="w-3.5 h-3.5 text-amber-500" /> {arena.location}
+                              <MapPin className="w-3.5 h-3.5 text-[#EC4899]" /> {arena.location}
                             </p>
                           </div>
 
                           <div className="flex flex-wrap gap-1 mt-2">
                             {arena.sports.map(s => (
-                              <span key={s} className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
+                              <span key={s} className="bg-pink-500/10 text-[#EC4899] border border-pink-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
                                 {s}
                               </span>
                             ))}
@@ -1976,7 +2086,7 @@ export default function WinDeclareApp() {
 
                             <button 
                               onClick={() => handleSelectArena(arena)}
-                              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/10"
+                              className="px-4 py-2 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/10"
                             >
                               Book Slot →
                             </button>
@@ -2008,9 +2118,7 @@ export default function WinDeclareApp() {
                 <ArrowLeft className="w-4 h-4" /> Back
               </button>
               <div className="flex items-center gap-2">
-                <div className="bg-amber-500 p-1 rounded-lg text-black">
-                  <Trophy className="w-4 h-4 stroke-[3]" />
-                </div>
+                <img src="/logo.png" alt="WinDeclare" className="w-7 h-7 object-contain" />
                 <span className="font-bold text-lg tracking-tight text-white">WinDeclare</span>
               </div>
             </div>
@@ -2022,7 +2130,7 @@ export default function WinDeclareApp() {
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-gray-400 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-amber-500" /> {selectedArena.location}
+                  <MapPin className="w-3.5 h-3.5 text-[#EC4899]" /> {selectedArena.location}
                 </p>
 
                 {/* FEATURE 3: Navigate to Ground Button */}
@@ -2037,7 +2145,7 @@ export default function WinDeclareApp() {
               {/* Sports Tags */}
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {selectedArena.sports.map(s => (
-                  <span key={s} className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-bold px-2.5 py-1 rounded-lg">
+                  <span key={s} className="bg-pink-500/10 text-[#EC4899] border border-pink-500/20 text-xs font-bold px-2.5 py-1 rounded-lg">
                     {s}
                   </span>
                 ))}
@@ -2065,16 +2173,19 @@ export default function WinDeclareApp() {
               {/* Date Selection */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-amber-500" /> SELECT DATE
+                  <Calendar className="w-3.5 h-3.5 text-[#EC4899]" /> SELECT DATE
                 </span>
                 <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
                   {datesList.map((d, index) => (
                     <button
                       key={d.date}
-                      onClick={() => setSelectedDateIndex(index)}
+                      onClick={() => {
+                        console.log(`👉 [PLAYER DATE PILL CLICKED] Selected Pill: "${d.day} ${d.date}" | Date Index: ${index} | Generated Date String: "${d.isoDate}"`);
+                        setSelectedDateIndex(index);
+                      }}
                       className={`flex-1 min-w-[60px] py-3 rounded-2xl flex flex-col items-center justify-center border transition ${
                         selectedDateIndex === index
-                          ? 'bg-gradient-to-b from-amber-500 to-orange-500 text-black border-amber-500 font-bold'
+                          ? 'bg-gradient-to-b from-[#0EA5E9] to-[#EC4899] text-black border-[#EC4899] font-bold'
                           : 'bg-[#080c14] border-gray-800 text-gray-400'
                       }`}
                     >
@@ -2088,21 +2199,22 @@ export default function WinDeclareApp() {
               {/* Slot Selection with Double-Booking Locking */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-amber-500" /> AVAILABLE SLOTS
+                  <Clock className="w-3.5 h-3.5 text-[#EC4899]" /> AVAILABLE SLOTS
                 </span>
                 <div className="grid grid-cols-3 gap-3">
-                  {getSlotsDataForArena(selectedArena, selectedDateIndex).map((slot) => {
-                    const now = new Date();
-                    const isToday = selectedDateIndex === 0;
-                    const slotHour = parseSlotTimeToHour(slot.time);
-                    if (isToday && slotHour <= now.getHours()) return null;
+                    {getSlotsDataForArena(selectedArena, selectedDateIndex).map((slot) => {
+                      const now = new Date();
+                      const isToday = selectedDateIndex === 0;
+                      const slotHour = parseSlotTimeToHour(slot.time);
+                      if (isToday && slotHour <= now.getHours()) return null;
 
-                    const isSelected = selectedSlots.some(s => s.time === slot.time);
-                    const isBooked = bookedSlots.some(b =>
-                      String(b.arenaId) === String(selectedArena.id) &&
-                      b.dateIndex === selectedDateIndex &&
-                      b.time === slot.time
-                    );
+                      const normalizedSlotTime = normalizeTimeString(slot.time);
+                      const isSelected = selectedSlots.some(s => normalizeTimeString(s.time) === normalizedSlotTime);
+                      const isBooked = bookedSlots.some(b =>
+                        String(b.arenaId) === String(selectedArena.id) &&
+                        b.dateIndex === selectedDateIndex &&
+                        normalizeTimeString(b.time) === normalizedSlotTime
+                      );
 
                     return (
                       <button
@@ -2111,9 +2223,9 @@ export default function WinDeclareApp() {
                         onClick={() => toggleSlotSelection(slot)}
                         className={`p-3 rounded-2xl border transition text-center space-y-1 ${
                           isBooked
-                            ? 'bg-gray-900/60 border-gray-800 text-gray-600 cursor-not-allowed line-through'
+                            ? 'bg-rose-950/20 border-rose-900/40 text-rose-500/70 opacity-60 cursor-not-allowed line-through'
                             : isSelected 
-                            ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold' 
+                            ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black border-[#EC4899] shadow-lg font-bold' 
                             : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
                         }`}
                       >
@@ -2132,7 +2244,7 @@ export default function WinDeclareApp() {
                 <div className="pt-4 border-t border-gray-800 space-y-4">
                   <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-amber-400 uppercase block font-mono">{selectedSlots.length} Hour(s) Selected</span>
+                      <span className="text-xs font-bold text-[#EC4899] uppercase block font-mono">{selectedSlots.length} Hour(s) Selected</span>
                       <p className="text-[11px] text-gray-400 truncate max-w-[200px]">{selectedSlots.map(s => s.time).join(', ')}</p>
                     </div>
                     <div className="text-right">
@@ -2144,7 +2256,7 @@ export default function WinDeclareApp() {
                   <button 
                     type="button"
                     onClick={handleInitiateCheckout}
-                    className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-sm rounded-xl transition shadow-lg flex items-center justify-center gap-2 shadow-amber-500/20"
+                    className="w-full py-3.5 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold text-sm rounded-xl transition shadow-lg flex items-center justify-center gap-2 shadow-pink-500/20"
                   >
                     <Lock className="w-4 h-4 stroke-[3]" /> Proceed to Payment (₹{totalPrice})
                   </button>
@@ -2186,7 +2298,7 @@ export default function WinDeclareApp() {
                   adminTab === 'pending-turfs' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'
                 }`}
               >
-                <Clock className="w-3.5 h-3.5 text-amber-400" /> Pending Verification ({Array.from(new Map([...pendingGrounds, ...arenas.filter(a => a.status === 'pending')].map(i => [String(i.id), i])).values()).length})
+                <Clock className="w-3.5 h-3.5 text-[#EC4899]" /> Pending Verification ({Array.from(new Map([...pendingGrounds, ...arenas.filter(a => a.status === 'pending')].map(i => [String(i.id), i])).values()).length})
               </button>
               <button
                 onClick={() => setAdminTab('owners-subscription')}
@@ -2244,7 +2356,7 @@ export default function WinDeclareApp() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-bold text-lg text-white flex items-center gap-2">
-                      <Clock className="w-5 h-5 text-amber-400" /> Pending Turf Verifications
+                      <Clock className="w-5 h-5 text-[#EC4899]" /> Pending Turf Verifications
                     </h3>
                     <p className="text-xs text-gray-400 mt-1">Review newly submitted turfs awaiting administrator approval before publishing to public feed</p>
                   </div>
@@ -2275,19 +2387,19 @@ export default function WinDeclareApp() {
                   return (
                     <div className="grid md:grid-cols-2 gap-6">
                       {pendingList.map((arena) => (
-                        <div key={arena.id} className="bg-[#080c14] border border-amber-500/30 rounded-2xl p-5 space-y-4 shadow-xl flex flex-col justify-between">
+                        <div key={arena.id} className="bg-[#080c14] border border-pink-500/30 rounded-2xl p-5 space-y-4 shadow-xl flex flex-col justify-between">
                           <div className="space-y-3">
                             <div className="flex items-start justify-between gap-3">
                               <div>
-                                <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-widest bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                                <span className="text-[10px] font-extrabold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 border border-pink-500/30 px-2 py-0.5 rounded">
                                   Pending Verification
                                 </span>
                                 <h4 className="font-extrabold text-lg text-white mt-1.5">{arena.title}</h4>
                                 <p className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
-                                  <MapPin className="w-3.5 h-3.5 text-amber-500" /> {arena.location}
+                                  <MapPin className="w-3.5 h-3.5 text-[#EC4899]" /> {arena.location}
                                 </p>
                               </div>
-                              <span className="text-sm font-black text-amber-400 font-mono bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20">
+                              <span className="text-sm font-black text-[#EC4899] font-mono bg-pink-500/10 px-2.5 py-1 rounded-xl border border-pink-500/20">
                                 ₹{arena.price}/hr
                               </span>
                             </div>
@@ -2299,14 +2411,14 @@ export default function WinDeclareApp() {
                               </div>
                               <div>
                                 <span className="text-[10px] font-bold text-gray-500 uppercase block">Payout Plan</span>
-                                <span className="font-bold text-amber-400 text-[11px]">{arena.plan === 'subscription' ? 'Plan 1: Free Tier' : 'Plan 2: 10% Comm.'}</span>
+                                <span className="font-bold text-[#EC4899] text-[11px]">{arena.plan === 'subscription' ? 'Plan 1: Free Tier' : 'Plan 2: 10% Comm.'}</span>
                               </div>
                             </div>
 
                             {arena.sports && arena.sports.length > 0 && (
                               <div className="flex flex-wrap gap-1">
                                 {arena.sports.map(s => (
-                                  <span key={s} className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
+                                  <span key={s} className="bg-pink-500/10 text-[#EC4899] border border-pink-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
                                     {s}
                                   </span>
                                 ))}
@@ -2364,7 +2476,7 @@ export default function WinDeclareApp() {
                         <tr key={a.id} className="hover:bg-gray-900/50 transition">
                           <td className="py-3.5 px-4 font-bold text-white">{a.title}</td>
                           <td className="py-3.5 px-4 text-gray-300">{a.ownerEmail || 'owner@turf.in'}</td>
-                          <td className="py-3.5 px-4 font-mono text-amber-400 font-bold">{a.ownerUpiId || 'owner@okaxis'}</td>
+                          <td className="py-3.5 px-4 font-mono text-[#EC4899] font-bold">{a.ownerUpiId || 'owner@okaxis'}</td>
                           <td className="py-3.5 px-4 font-mono font-bold text-white">₹{a.price}/hr</td>
                           <td className="py-3.5 px-4">
                             <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
@@ -2384,7 +2496,7 @@ export default function WinDeclareApp() {
               <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-lg text-white">Plan 2: 10% Commission Plan Owners</h3>
-                  <span className="text-xs text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-md">
+                  <span className="text-xs text-[#EC4899] font-bold bg-pink-500/10 border border-pink-500/30 px-2.5 py-1 rounded-md">
                     Automated Platform Payouts via Admin QR
                   </span>
                 </div>
@@ -2404,7 +2516,7 @@ export default function WinDeclareApp() {
                         <tr key={a.id} className="hover:bg-gray-900/50 transition">
                           <td className="py-3.5 px-4 font-bold text-white">{a.title}</td>
                           <td className="py-3.5 px-4 text-gray-300">{a.ownerEmail || 'owner.kelo@turf.in'}</td>
-                          <td className="py-3.5 px-4 font-mono font-bold text-amber-400">10% Fee per booking</td>
+                          <td className="py-3.5 px-4 font-mono font-bold text-[#EC4899]">10% Fee per booking</td>
                           <td className="py-3.5 px-4 font-mono text-purple-400 font-bold">{adminUpiId}</td>
                           <td className="py-3.5 px-4">
                             <span className="bg-purple-500/20 text-purple-400 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
@@ -2453,7 +2565,7 @@ export default function WinDeclareApp() {
                       ]).map((u) => (
                         <tr key={u.id} className="hover:bg-gray-900/50 transition">
                           <td className="py-3.5 px-4 font-bold text-white flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black flex items-center justify-center text-[10px]">
+                            <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-[#0EA5E9] to-[#EC4899] text-black font-black flex items-center justify-center text-[10px]">
                               {u.display_name ? u.display_name.charAt(0) : 'U'}
                             </div>
                             {u.display_name}
@@ -2462,7 +2574,7 @@ export default function WinDeclareApp() {
                           <td className="py-3.5 px-4">
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
                               u.role?.toLowerCase() === 'owner' 
-                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
+                                ? 'bg-pink-500/10 text-[#EC4899] border-pink-500/30' 
                                 : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                             }`}>
                               {u.role || 'Player'}
@@ -2472,7 +2584,7 @@ export default function WinDeclareApp() {
                             <button
                               type="button"
                               onClick={() => window.open(`mailto:${u.email}?subject=WinDeclare Update&body=Hi ${u.display_name},`)}
-                              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl shadow-lg transition flex items-center gap-1.5"
+                              className="px-3 py-1.5 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl shadow-lg transition flex items-center gap-1.5"
                             >
                               <Mail className="w-3.5 h-3.5" /> Send Email
                             </button>
@@ -2497,7 +2609,7 @@ export default function WinDeclareApp() {
                         <div>
                           <h4 className="font-bold text-white text-xs">{a.title}</h4>
                           <p className="text-[10px] text-gray-400">{a.location}</p>
-                          <p className="text-[10px] font-bold text-amber-400 mt-0.5">₹{a.price}/hr • Plan: {a.plan}</p>
+                          <p className="text-[10px] font-bold text-[#EC4899] mt-0.5">₹{a.price}/hr • Plan: {a.plan}</p>
                         </div>
                       </div>
                       <span className="text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/30 px-2 py-1 rounded">Active</span>
@@ -2526,7 +2638,7 @@ export default function WinDeclareApp() {
                     <tbody className="divide-y divide-gray-800/60">
                       {myBookings.map(b => (
                         <tr key={b.id} className="hover:bg-gray-900/50 transition">
-                          <td className="py-3.5 px-4 font-mono font-bold text-amber-400">{b.id}</td>
+                          <td className="py-3.5 px-4 font-mono font-bold text-[#EC4899]">{b.id}</td>
                           <td className="py-3.5 px-4 font-bold text-white">{b.arenaTitle}</td>
                           <td className="py-3.5 px-4 text-gray-300">{b.date} ({b.slots})</td>
                           <td className="py-3.5 px-4 text-gray-400 font-mono">{b.userContact}</td>
@@ -2557,7 +2669,7 @@ export default function WinDeclareApp() {
                       type="text" 
                       value={adminUpiId}
                       onChange={(e) => setAdminUpiId(e.target.value)}
-                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-purple-500"
+                      className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-[#EC4899] font-mono font-bold focus:outline-none focus:border-purple-500"
                     />
                   </div>
 
@@ -2620,9 +2732,9 @@ export default function WinDeclareApp() {
 
                 {/* PLAN-BASED REVENUE ANALYTICS & EARNINGS BAR CHART HEADER (Requirement 2) */}
                 {isFreePlan ? (
-                  <div className="bg-[#0e1320] border border-amber-500/30 rounded-3xl p-6 shadow-2xl space-y-4">
+                  <div className="bg-[#0e1320] border border-pink-500/30 rounded-3xl p-6 shadow-2xl space-y-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                      <div className="w-12 h-12 rounded-2xl bg-pink-500/10 border border-pink-500/30 flex items-center justify-center text-[#EC4899]">
                         <Lock className="w-6 h-6" />
                       </div>
                       <div>
@@ -2637,8 +2749,8 @@ export default function WinDeclareApp() {
                     </div>
 
                     <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-2 text-xs text-gray-300">
-                      <p className="font-semibold text-amber-400 flex items-center gap-1.5">
-                        <Shield className="w-4 h-4 text-amber-400" />
+                      <p className="font-semibold text-[#EC4899] flex items-center gap-1.5">
+                        <Shield className="w-4 h-4 text-[#EC4899]" />
                         Upgrade to Hybrid (3% + ₹2k) or Commission (10%) plan to unlock detailed revenue analytics, automatic payouts, and performance charts.
                       </p>
                       <p className="text-gray-400 text-[11px]">
@@ -2668,7 +2780,7 @@ export default function WinDeclareApp() {
 
                       <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
                         <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Daily Net Revenue</span>
-                        <span className="text-2xl font-black text-amber-400 font-mono block">₹{Math.round(todayNet)}</span>
+                        <span className="text-2xl font-black text-[#EC4899] font-mono block">₹{Math.round(todayNet)}</span>
                         <span className="text-[10px] text-gray-500 block">Today's collection</span>
                       </div>
 
@@ -2689,7 +2801,7 @@ export default function WinDeclareApp() {
                     <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-5 space-y-4">
                       <div className="flex items-center justify-between">
                         <h4 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
-                          <Trophy className="w-4 h-4 text-amber-400" /> Net Revenue Performance Chart (Weekly)
+                          <Trophy className="w-4 h-4 text-[#EC4899]" /> Net Revenue Performance Chart (Weekly)
                         </h4>
                         <span className="text-[10px] font-mono text-gray-400">Net Rate: {100 - (commissionRate * 100)}%</span>
                       </div>
@@ -2721,7 +2833,7 @@ export default function WinDeclareApp() {
                   <div className="space-y-6">
                     {ownerTurfs.length === 0 ? (
                       <div className="text-center py-16 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-3xl space-y-4 shadow-xl">
-                        <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto text-amber-400">
+                        <div className="w-16 h-16 bg-pink-500/10 border border-pink-500/30 rounded-2xl flex items-center justify-center mx-auto text-[#EC4899]">
                           <Calendar className="w-8 h-8" />
                         </div>
                         <div className="space-y-1">
@@ -2732,7 +2844,7 @@ export default function WinDeclareApp() {
                         </div>
                         <button 
                           onClick={() => { setOwnerTab('listings'); setShowAddTurfForm(true); }}
-                          className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition inline-flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                          className="px-6 py-3 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition inline-flex items-center gap-2 shadow-lg shadow-pink-500/20"
                         >
                           <Plus className="w-4 h-4 stroke-[3]" /> Add New Turf Venue
                         </button>
@@ -2741,7 +2853,7 @@ export default function WinDeclareApp() {
                       <div className="space-y-6">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div>
-                            <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                            <span className="text-[10px] font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
                               Daily Time Slot Calendar
                             </span>
                             <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Venue Slot Availability</h2>
@@ -2758,7 +2870,7 @@ export default function WinDeclareApp() {
                                 const found = ownerTurfs.find(t => String(t.id) === selectedId);
                                 if (found) setSelectedArena(found);
                               }}
-                              className="bg-[#0e1320] border border-gray-800 rounded-xl px-3 py-2 text-xs font-bold text-amber-400 focus:outline-none focus:border-amber-500 cursor-pointer"
+                              className="bg-[#0e1320] border border-gray-800 rounded-xl px-3 py-2 text-xs font-bold text-[#EC4899] focus:outline-none focus:border-[#EC4899] cursor-pointer"
                             >
                               {ownerTurfs.map(t => (
                                 <option key={String(t.id)} value={String(t.id)}>{t.title}</option>
@@ -2771,19 +2883,22 @@ export default function WinDeclareApp() {
                     <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-4 space-y-4 shadow-xl">
                       <div className="flex items-center justify-between border-b border-gray-800/80 pb-3">
                         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-amber-500" /> SELECT DATE
+                          <Calendar className="w-3.5 h-3.5 text-[#EC4899]" /> SELECT DATE
                         </span>
-                        <span className="text-xs font-bold text-amber-400">{datesList[selectedDateIndex]?.day}, Jul {datesList[selectedDateIndex]?.date}</span>
+                        <span className="text-xs font-bold text-[#EC4899]">{datesList[selectedDateIndex]?.day}, Jul {datesList[selectedDateIndex]?.date}</span>
                       </div>
 
                       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
                         {datesList.map((d, index) => (
                           <button
                             key={d.date}
-                            onClick={() => setSelectedDateIndex(index)}
+                            onClick={() => {
+                              console.log(`👉 [OWNER DATE PILL CLICKED] Selected Pill: "${d.day} ${d.date}" | Date Index: ${index} | Generated Date String: "${d.isoDate}"`);
+                              setSelectedDateIndex(index);
+                            }}
                             className={`flex-1 min-w-[55px] py-2.5 rounded-xl flex flex-col items-center justify-center border transition ${
                               selectedDateIndex === index
-                                ? 'bg-gradient-to-b from-amber-500 to-orange-500 text-black border-amber-500 font-bold'
+                                ? 'bg-gradient-to-b from-[#0EA5E9] to-[#EC4899] text-black border-[#EC4899] font-bold'
                                 : 'bg-[#080c14] border-gray-800 text-gray-400'
                             }`}
                           >
@@ -2798,7 +2913,7 @@ export default function WinDeclareApp() {
                     <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 space-y-5 shadow-xl">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-800 pb-3">
                           <h3 className="font-extrabold text-white text-base flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-amber-500" /> 24-Hour Time Slots ({activeOwnerTurf.title})
+                            <Clock className="w-4 h-4 text-[#EC4899]" /> 24-Hour Time Slots ({activeOwnerTurf.title})
                           </h3>
 
                           {selectedSlots.length > 0 && (
@@ -2806,6 +2921,51 @@ export default function WinDeclareApp() {
                               type="button"
                               onClick={async () => {
                                 const activeDate = datesList[selectedDateIndex];
+                                const targetDateStr = getYYYYMMDD(selectedDateIndex);
+                                const selectedTimeStrings = selectedSlots.map(s => s.time);
+                                const isUuid = typeof activeOwnerTurf.id === 'string' && String(activeOwnerTurf.id).includes('-');
+
+                                // Preventative double-booking check before offline confirm
+                                try {
+                                  let query = supabase
+                                    .from('bookings')
+                                    .select('slots')
+                                    .eq('booking_date', targetDateStr)
+                                    .in('status', ['confirmed', 'booked']);
+
+                                  if (isUuid) {
+                                    query = query.eq('ground_id', activeOwnerTurf.id);
+                                  } else {
+                                    query = query.or(`arena_id.eq.${Number(activeOwnerTurf.id)},ground_id.eq.${activeOwnerTurf.id}`);
+                                  }
+
+                                  const { data: activeBookings } = await query;
+                                  if (activeBookings && activeBookings.length > 0) {
+                                    const takenSlots = new Set<string>();
+                                    activeBookings.forEach((b: any) => {
+                                      let bSlots: string[] = [];
+                                      if (Array.isArray(b.slots)) {
+                                        bSlots = b.slots.map((s: any) => typeof s === 'string' ? s : s.time);
+                                      } else if (typeof b.slots === 'string') {
+                                        bSlots = b.slots.split(',').map((s: string) => s.trim());
+                                      }
+                                      bSlots.forEach((s: string) => {
+                                        if (s) takenSlots.add(s);
+                                      });
+                                    });
+
+                                    const hasConflict = selectedTimeStrings.some(s => takenSlots.has(s));
+                                    if (hasConflict) {
+                                      alert('Slot already booked by another user.');
+                                      showToast('❌ Slot already booked by another user.');
+                                      fetchSlotAvailability(activeOwnerTurf.id, selectedDateIndex);
+                                      return;
+                                    }
+                                  }
+                                } catch (e) {
+                                  console.error("Offline double-booking pre-check error:", e);
+                                }
+
                                 const offlineBooking: Booking = {
                                   id: `OFF-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
                                   arenaId: Number(activeOwnerTurf.id),
@@ -2835,13 +2995,14 @@ export default function WinDeclareApp() {
                                 try {
                                   await supabase.from('bookings').insert([{
                                     booking_id: offlineBooking.id,
-                                    arena_id: Number(activeOwnerTurf.id),
-                                    ground_id: Number(activeOwnerTurf.id),
+                                    arena_id: isUuid ? null : Number(activeOwnerTurf.id),
+                                    ground_id: isUuid ? activeOwnerTurf.id : Number(activeOwnerTurf.id),
                                     arena_title: offlineBooking.arenaTitle,
                                     user_id: currentUser?.id || '',
+                                    booking_date: targetDateStr,
                                     date: offlineBooking.date,
                                     date_index: offlineBooking.dateIndex,
-                                    slots: offlineBooking.slots,
+                                    slots: selectedTimeStrings,
                                     amount: offlineBooking.amount,
                                     user_contact: offlineBooking.userContact,
                                     plan_used: offlineBooking.planUsed,
@@ -2871,11 +3032,12 @@ export default function WinDeclareApp() {
                             const slotHour = parseSlotTimeToHour(slot.time);
                             if (isToday && slotHour <= now.getHours()) return null;
 
-                            const isSelected = selectedSlots.some(s => s.time === slot.time);
+                            const normalizedSlotTime = normalizeTimeString(slot.time);
+                            const isSelected = selectedSlots.some(s => normalizeTimeString(s.time) === normalizedSlotTime);
                             const matchEntry = bookedSlots.find(b =>
                               String(b.arenaId) === String(activeOwnerTurf.id) &&
                               b.dateIndex === selectedDateIndex &&
-                              b.time === slot.time
+                              normalizeTimeString(b.time) === normalizedSlotTime
                             );
                             const isBooked = matchEntry?.source === 'booking';
                             const isClosed = matchEntry?.source === 'override';
@@ -2888,7 +3050,7 @@ export default function WinDeclareApp() {
                                 className={`p-3 rounded-2xl border transition text-center space-y-1.5 ${
                                   isBooked ? 'bg-rose-950/20 border-rose-500/30 text-rose-400 cursor-not-allowed'
                                   : isClosed ? 'bg-gray-800/40 border-gray-700 text-gray-500 cursor-not-allowed'
-                                  : isSelected ? 'bg-amber-500 text-black border-amber-500 shadow-lg font-bold'
+                                  : isSelected ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black border-[#EC4899] shadow-lg font-bold'
                                   : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
                                 }`}
                               >
@@ -2896,7 +3058,7 @@ export default function WinDeclareApp() {
                                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                                   isBooked ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                                   : isClosed ? 'bg-gray-700/40 text-gray-400 border border-gray-600'
-                                  : isSelected ? 'bg-black text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                                  : isSelected ? 'bg-black text-[#EC4899]' : 'bg-emerald-500/10 text-emerald-400'
                                 }`}>
                                   {isBooked ? 'BOOKED' : isClosed ? 'CLOSED' : isSelected ? 'Selected' : `₹${slot.price}`}
                                 </span>
@@ -2915,7 +3077,7 @@ export default function WinDeclareApp() {
                   <div className="space-y-6">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div>
-                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        <span className="text-[10px] font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
                           Listings Manager
                         </span>
                         <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Your sports grounds</h2>
@@ -2924,7 +3086,7 @@ export default function WinDeclareApp() {
 
                       <button 
                         onClick={() => setShowAddTurfForm(true)}
-                        className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-lg shadow-amber-500/20"
+                        className="px-4 py-2.5 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-lg shadow-pink-500/20"
                       >
                         <Plus className="w-4 h-4 stroke-[3]" /> Add New Turf Venue
                       </button>
@@ -2933,7 +3095,7 @@ export default function WinDeclareApp() {
                     {/* Clean Empty State when Owner Has No Turfs */}
                     {ownerTurfs.length === 0 && !showAddTurfForm ? (
                       <div className="text-center py-16 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-3xl space-y-4 shadow-xl">
-                        <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto text-amber-400">
+                        <div className="w-16 h-16 bg-pink-500/10 border border-pink-500/30 rounded-2xl flex items-center justify-center mx-auto text-[#EC4899]">
                           <Building2 className="w-8 h-8" />
                         </div>
                         <div className="space-y-1">
@@ -2944,7 +3106,7 @@ export default function WinDeclareApp() {
                         </div>
                         <button 
                           onClick={() => setShowAddTurfForm(true)}
-                          className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition inline-flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                          className="px-6 py-3 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition inline-flex items-center gap-2 shadow-lg shadow-pink-500/20"
                         >
                           <Plus className="w-4 h-4 stroke-[3]" /> Add New Turf Venue
                         </button>
@@ -2955,7 +3117,7 @@ export default function WinDeclareApp() {
                         {showAddTurfForm && (
                           <form onSubmit={handleCreateVenue} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-4 sm:p-6 space-y-5 shadow-2xl">
                             <div className="flex items-center justify-between border-b border-gray-800 pb-3">
-                              <h3 className="font-bold text-amber-400 text-sm flex items-center gap-2">
+                              <h3 className="font-bold text-[#EC4899] text-sm flex items-center gap-2">
                                 <Building2 className="w-4 h-4" /> Add New Ground Arena
                               </h3>
                               <button type="button" onClick={() => setShowAddTurfForm(false)} className="text-gray-400 hover:text-white p-1">
@@ -2972,7 +3134,7 @@ export default function WinDeclareApp() {
                                   value={newArenaName}
                                   onChange={(e) => setNewArenaName(e.target.value)}
                                   placeholder="Neon Arena Football Hub" 
-                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
                                 />
                               </div>
 
@@ -2984,13 +3146,13 @@ export default function WinDeclareApp() {
                                   value={newArenaLocation}
                                   onChange={(e) => setNewArenaLocation(e.target.value)}
                                   placeholder="Gachibowli, Hyderabad" 
-                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
                                 />
                               </div>
 
                               {/* SELECT 3-TIER PRICING PLAN */}
                               <div>
-                                <label className="block text-[11px] font-bold text-amber-400 uppercase mb-1">Select Listing Plan (Required) *</label>
+                                <label className="block text-[11px] font-bold text-[#EC4899] uppercase mb-1">Select Listing Plan (Required) *</label>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                   {/* Option A: Free Plan */}
                                   <button
@@ -3038,14 +3200,14 @@ export default function WinDeclareApp() {
                                       setNewArenaPlan('commission');
                                     }}
                                     className={`p-3.5 rounded-xl border text-left transition ${
-                                      newArenaPlanType === 'commission' ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold shadow-lg' : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                                      newArenaPlanType === 'commission' ? 'bg-pink-500/10 border-[#EC4899] text-[#EC4899] font-bold shadow-lg' : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
                                     }`}
                                   >
                                     <div className="flex items-center justify-between">
                                       <p className="text-xs font-black text-white">Commission Plan</p>
-                                      {newArenaPlanType === 'commission' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                                      {newArenaPlanType === 'commission' && <Check className="w-3.5 h-3.5 text-[#EC4899]" />}
                                     </div>
-                                    <p className="text-[11px] font-extrabold text-amber-400 mt-1">10% Comm • ₹0/mo</p>
+                                    <p className="text-[11px] font-extrabold text-[#EC4899] mt-1">10% Comm • ₹0/mo</p>
                                     <p className="text-[10px] text-gray-500 mt-1">Online Payment Gateway</p>
                                   </button>
                                 </div>
@@ -3060,7 +3222,7 @@ export default function WinDeclareApp() {
                                     value={newArenaUpiId}
                                     onChange={(e) => setNewArenaUpiId(e.target.value)}
                                     placeholder="owner.name@okaxis" 
-                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 font-mono" 
+                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono" 
                                   />
                                 </div>
 
@@ -3086,7 +3248,7 @@ export default function WinDeclareApp() {
                                     value={newArenaPrice}
                                     onChange={(e) => setNewArenaPrice(Number(e.target.value))}
                                     placeholder="1200" 
-                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
                                   />
                                 </div>
                                 <div>
@@ -3096,7 +3258,7 @@ export default function WinDeclareApp() {
                                     value={newArenaEmail || currentUser?.email || ''}
                                     onChange={(e) => setNewArenaEmail(e.target.value)}
                                     placeholder="owner@turf.in" 
-                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500" 
+                                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
                                   />
                                 </div>
                               </div>
@@ -3122,7 +3284,7 @@ export default function WinDeclareApp() {
                                   onChange={handleQrFileUpload}
                                   className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2 text-xs text-gray-300 focus:outline-none focus:border-purple-500 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-purple-600 file:text-white hover:file:bg-purple-500 cursor-pointer"
                                 />
-                                {isUploadingQr && <p className="text-[10px] text-amber-400 font-semibold animate-pulse">Uploading QR Code Image to Supabase Storage ('qr-codes')...</p>}
+                                {isUploadingQr && <p className="text-[10px] text-[#EC4899] font-semibold animate-pulse">Uploading QR Code Image to Supabase Storage ('qr-codes')...</p>}
                                 {newArenaQrCodeUrl && (
                                   <div className="flex items-center gap-3 bg-[#080c14] border border-gray-800 p-2 rounded-xl">
                                     <img src={newArenaQrCodeUrl} alt="Uploaded QR" className="w-12 h-12 object-cover rounded-lg bg-white p-1" />
@@ -3133,7 +3295,7 @@ export default function WinDeclareApp() {
 
                               <button 
                                 type="submit"
-                                className="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold py-3.5 rounded-xl transition text-xs shadow-lg mt-2 flex items-center justify-center gap-2"
+                                className="w-full bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold py-3.5 rounded-xl transition text-xs shadow-lg mt-2 flex items-center justify-center gap-2"
                               >
                                 <Plus className="w-4 h-4 stroke-[3]" /> Publish Ground Arena Now
                               </button>
@@ -3154,7 +3316,7 @@ export default function WinDeclareApp() {
                               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                               : pType === 'hybrid'
                               ? 'bg-teal-500/10 border-teal-500/30 text-teal-400'
-                              : 'bg-amber-500/10 border-amber-500/30 text-amber-400';
+                              : 'bg-pink-500/10 border-pink-500/30 text-[#EC4899]';
 
                             return (
                               <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col space-y-4">
@@ -3169,7 +3331,7 @@ export default function WinDeclareApp() {
                                         </span>
                                       </div>
                                       <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
-                                      <div className="flex gap-2 text-[11px] text-amber-400 mt-1 font-semibold">
+                                      <div className="flex gap-2 text-[11px] text-[#EC4899] mt-1 font-semibold">
                                         <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span>
                                       </div>
                                     </div>
@@ -3197,7 +3359,7 @@ export default function WinDeclareApp() {
                                   <div className="space-y-0.5">
                                     <div className="flex items-center gap-2">
                                       <span className="text-[11px] font-bold text-gray-300 flex items-center gap-1">
-                                        <Lock className="w-3.5 h-3.5 text-amber-400" /> Listing Plan:
+                                        <Lock className="w-3.5 h-3.5 text-[#EC4899]" /> Listing Plan:
                                       </span>
                                       <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded border ${pBadgeClass}`}>
                                         {pType}
@@ -3223,7 +3385,7 @@ export default function WinDeclareApp() {
                   return (
                     <div className="space-y-6">
                       <div>
-                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        <span className="text-[10px] font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
                           Bookings Ledger
                         </span>
                         <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Player Bookings History</h2>
@@ -3249,7 +3411,7 @@ export default function WinDeclareApp() {
                             <div key={`${bId}-${index}`} className="bg-[#0e1320] border border-gray-800 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                               <div className="space-y-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-black text-amber-500 font-mono">{bId}</span>
+                                  <span className="text-xs font-black text-[#EC4899] font-mono">{bId}</span>
                                   {isOffline && (
                                     <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
                                       Offline Walk-In
@@ -3261,13 +3423,13 @@ export default function WinDeclareApp() {
                                 </div>
                                 <h4 className="font-bold text-white text-base">{arenaTitle}</h4>
                                 <p className="text-xs text-gray-400 flex items-center gap-2">
-                                  <Clock className="w-3.5 h-3.5 text-amber-400" /> {dateStr} • {slotsStr}
+                                  <Clock className="w-3.5 h-3.5 text-[#EC4899]" /> {dateStr} • {slotsStr}
                                 </p>
                                 <p className="text-[11px] text-gray-500">Contact: {contactStr}</p>
                               </div>
 
                               <div className="sm:text-right space-y-1">
-                                <span className="text-xl font-black text-amber-400 block font-mono">₹{amountVal}</span>
+                                <span className="text-xl font-black text-[#EC4899] block font-mono">₹{amountVal}</span>
                                 <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
                                   ✓ {b.payment_status === 'offline_cash' ? 'Offline Cash Collected' : 'Payment Collected'}
                                 </span>
@@ -3288,7 +3450,7 @@ export default function WinDeclareApp() {
                   return (
                     <div className="space-y-6">
                       <div>
-                        <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        <span className="text-[10px] font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
                           Slot Pricing Manager
                         </span>
                         <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Time-based pricing</h2>
@@ -3303,14 +3465,14 @@ export default function WinDeclareApp() {
                           <div>
                             <h3 className="font-bold text-white text-base">{ownerGround?.title || 'Ground Arena'}</h3>
                             <div className="flex items-center gap-2.5 mt-2">
-                              <label className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                              <label className="text-xs font-bold text-[#EC4899] uppercase tracking-wider">
                                 Turf Base Price Per Hour (₹):
                               </label>
                               <input 
                                 type="number"
                                 value={baseGroundPrice}
                                 onChange={(e) => setEditingBasePrice(Number(e.target.value))}
-                                className="w-32 bg-[#080c14] border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-amber-500"
+                                className="w-32 bg-[#080c14] border border-gray-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-[#EC4899]"
                               />
                             </div>
                           </div>
@@ -3324,7 +3486,7 @@ export default function WinDeclareApp() {
                                 onClick={() => setSelectedDay(day)}
                                 className={`px-3.5 py-2 rounded-lg text-xs font-bold transition ${
                                   selectedDay === day
-                                    ? 'bg-amber-500 text-black shadow-md font-black'
+                                    ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black shadow-md font-black'
                                     : 'text-gray-400 hover:text-white'
                                 }`}
                               >
@@ -3353,7 +3515,7 @@ export default function WinDeclareApp() {
                                 className={`border p-3 rounded-xl space-y-2 transition relative ${
                                   isClosedOverride 
                                     ? 'bg-rose-950/20 border-rose-500/40 opacity-75' 
-                                    : 'bg-[#080c14] border-gray-800/80 hover:border-amber-500/40'
+                                    : 'bg-[#080c14] border-gray-800/80 hover:border-pink-500/40'
                                 }`}
                               >
                                 <div className="flex items-center justify-between">
@@ -3367,7 +3529,7 @@ export default function WinDeclareApp() {
                                         CLOSED
                                       </span>
                                     ) : slotPrices[selectedDay]?.[slot.time] !== undefined && (
-                                      <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">
+                                      <span className="text-[9px] font-bold bg-pink-500/20 text-[#EC4899] px-1.5 py-0.5 rounded">
                                         Custom
                                       </span>
                                     )}
@@ -3396,13 +3558,13 @@ export default function WinDeclareApp() {
 
                                 {/* Inline Override Menu Dropdown */}
                                 {openOverrideMenuSlot === slot.time && !isClosedOverride && (
-                                  <div className="absolute right-2 top-10 z-20 bg-[#0e1320] border border-amber-500/40 rounded-xl p-2 shadow-2xl space-y-1.5 w-44">
+                                  <div className="absolute right-2 top-10 z-20 bg-[#0e1320] border border-pink-500/40 rounded-xl p-2 shadow-2xl space-y-1.5 w-44">
                                     <button
                                       type="button"
                                       onClick={() => handleToggleSlotOverride(ownerGround.id, slot.time, 'every', selectedDay)}
-                                      className="w-full text-left px-2.5 py-1.5 hover:bg-amber-500/20 text-amber-300 text-[11px] font-bold rounded-lg transition flex items-center gap-1.5"
+                                      className="w-full text-left px-2.5 py-1.5 hover:bg-pink-500/20 text-[#EC4899] text-[11px] font-bold rounded-lg transition flex items-center gap-1.5"
                                     >
-                                      <Lock className="w-3 h-3 text-amber-400" /> Turn off every {selectedDay}
+                                      <Lock className="w-3 h-3 text-[#EC4899]" /> Turn off every {selectedDay}
                                     </button>
                                     <button
                                       type="button"
@@ -3422,11 +3584,11 @@ export default function WinDeclareApp() {
                                       placeholder={String(baseGroundPrice)}
                                       value={slotPrices[selectedDay]?.[slot.time] ?? slot.price}
                                       onChange={(e) => handlePriceChange(selectedDay, slot.time, Number(e.target.value))}
-                                      className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-amber-400 font-mono font-bold focus:outline-none focus:border-amber-500"
+                                      className="w-full bg-[#0e1320] border border-gray-800 rounded-lg pl-7 pr-3 py-1.5 text-xs text-[#EC4899] font-mono font-bold focus:outline-none focus:border-[#EC4899]"
                                     />
                                   </div>
                                   <p className="text-[10px] text-gray-500 font-semibold">
-                                    Slot Rate: <span className="text-amber-400 font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
+                                    Slot Rate: <span className="text-[#EC4899] font-bold">₹{slotPrices[selectedDay]?.[slot.time] ?? slot.price}</span>
                                   </p>
                                 </div>
                               </div>
@@ -3439,7 +3601,7 @@ export default function WinDeclareApp() {
                           <button 
                             type="button"
                             onClick={() => handleSaveOwnerPricing(ownerGround.id, baseGroundPrice)}
-                            className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl shadow-lg transition"
+                            className="px-6 py-2.5 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold text-xs rounded-xl shadow-lg transition"
                           >
                             Save Pricing
                           </button>
@@ -3455,7 +3617,7 @@ export default function WinDeclareApp() {
                 {ownerTab === 'account' && (
                   <div className="space-y-6">
                     <div>
-                      <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                      <span className="text-[10px] font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
                         Partner Profile
                       </span>
                       <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Owner Account Details</h2>
@@ -3475,7 +3637,7 @@ export default function WinDeclareApp() {
 
                       <div>
                         <span className="text-xs text-gray-500 uppercase block font-bold">Payout UPI ID</span>
-                        <span className="text-sm font-mono font-bold text-amber-400">{activeOwnerTurf?.ownerUpiId || 'owner@okaxis'}</span>
+                        <span className="text-sm font-mono font-bold text-[#EC4899]">{activeOwnerTurf?.ownerUpiId || 'owner@okaxis'}</span>
                       </div>
                     </div>
                   </div>
@@ -3505,7 +3667,7 @@ export default function WinDeclareApp() {
             <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
               <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 text-black font-black text-xl flex items-center justify-center shadow-lg">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-[#0EA5E9] to-[#EC4899] text-black font-black text-xl flex items-center justify-center shadow-lg">
                     {currentUser ? currentUser.name.charAt(0) : 'P'}
                   </div>
                   <div>
@@ -3521,19 +3683,19 @@ export default function WinDeclareApp() {
                 <div className="flex gap-1 bg-[#080c14] p-1.5 rounded-xl border border-gray-800">
                   <button
                     onClick={() => setProfileTab('bookings')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'bookings' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'bookings' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black' : 'text-gray-400 hover:text-white'}`}
                   >
                     My Bookings ({playerBookings.length})
                   </button>
                   <button
                     onClick={() => setProfileTab('favorites')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'favorites' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'favorites' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black' : 'text-gray-400 hover:text-white'}`}
                   >
                     Favorites ({playerFavoriteArenas.length})
                   </button>
                   <button
                     onClick={() => setProfileTab('account')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'account' ? 'bg-amber-500 text-black' : 'text-gray-400 hover:text-white'}`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'account' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black' : 'text-gray-400 hover:text-white'}`}
                   >
                     Account
                   </button>
@@ -3544,17 +3706,17 @@ export default function WinDeclareApp() {
               {profileTab === 'bookings' && (
                 <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-amber-500" /> Confirmed Booking Tickets
+                    <Calendar className="w-4 h-4 text-[#EC4899]" /> Confirmed Booking Tickets
                   </h3>
 
                   {playerBookings.length === 0 ? (
                     <div className="text-center py-12 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-2xl space-y-3">
-                      <Calendar className="w-8 h-8 text-amber-500 mx-auto opacity-70" />
+                      <Calendar className="w-8 h-8 text-[#EC4899] mx-auto opacity-70" />
                       <h4 className="text-sm font-bold text-white">No upcoming bookings found</h4>
                       <p className="text-xs text-gray-400">Browse available grounds and book your first slot!</p>
                       <button 
                         onClick={() => setView('browse')}
-                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/20"
+                        className="px-4 py-2 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/20"
                       >
                         Browse Sports Grounds
                       </button>
@@ -3574,7 +3736,7 @@ export default function WinDeclareApp() {
                                 </span>
                               )}
                             </div>
-                            <p className="text-[10px] font-mono text-amber-400">
+                            <p className="text-[10px] font-mono text-[#EC4899]">
                               ID: #{b.id.length > 8 ? b.id.substring(0, 8).toUpperCase() : b.id}
                             </p>
                             <p className="text-[10px] text-gray-400">{b.date} • {b.slots}</p>
@@ -3605,7 +3767,7 @@ export default function WinDeclareApp() {
                       <p className="text-xs text-gray-400">Click the heart icon on any turf card to save it here!</p>
                       <button 
                         onClick={() => setView('browse')}
-                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/20"
+                        className="px-4 py-2 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/20"
                       >
                         Explore Turfs
                       </button>
@@ -3619,7 +3781,7 @@ export default function WinDeclareApp() {
                             <div>
                               <h4 className="font-bold text-white text-xs">{arena.title}</h4>
                               <p className="text-[10px] text-gray-400">{arena.location}</p>
-                              <p className="text-[10px] font-bold text-amber-400 mt-0.5">₹{arena.price}/hr • ★ {arena.rating}</p>
+                              <p className="text-[10px] font-bold text-[#EC4899] mt-0.5">₹{arena.price}/hr • ★ {arena.rating}</p>
                             </div>
                           </div>
                           <button 
@@ -3639,7 +3801,7 @@ export default function WinDeclareApp() {
             {profileTab === 'account' && (
               <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-amber-500" /> Player Profile & Security Settings
+                  <Settings className="w-4 h-4 text-[#EC4899]" /> Player Profile & Security Settings
                 </h3>
 
                 <div className="space-y-3 max-w-md">
@@ -3664,7 +3826,7 @@ export default function WinDeclareApp() {
 
                   <button 
                     onClick={() => showToast('Profile details saved!')}
-                    className="px-4 py-2 bg-amber-500 text-black text-xs font-extrabold rounded-xl shadow-lg"
+                    className="px-4 py-2 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black text-xs font-extrabold rounded-xl shadow-lg"
                   >
                     Save Preferences
                   </button>
@@ -3688,7 +3850,7 @@ export default function WinDeclareApp() {
             </button>
 
             <div className="space-y-2">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-xs font-bold text-amber-500 uppercase tracking-wider">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-pink-500/10 border border-pink-500/20 text-xs font-bold text-[#EC4899] uppercase tracking-wider">
                 <Lock className="w-3.5 h-3.5" /> WinDeclare Access
               </div>
               <h3 className="text-2xl font-extrabold text-white">Sign In to Continue</h3>
@@ -3805,7 +3967,7 @@ export default function WinDeclareApp() {
 
         return (
           <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-[#0e1320] border border-amber-500/30 w-full max-w-md rounded-3xl p-6 shadow-2xl relative space-y-5">
+            <div className="bg-[#0e1320] border border-pink-500/30 w-full max-w-md rounded-3xl p-6 shadow-2xl relative space-y-5">
               <button 
                 onClick={() => setShowPaymentModal(false)}
                 className="absolute top-4 right-4 text-gray-400 hover:text-white p-1 bg-gray-900/80 rounded-xl z-10"
@@ -3815,7 +3977,7 @@ export default function WinDeclareApp() {
 
               {/* a) Turf Name, Price & Booking Breakdown */}
               <div>
-                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-500 uppercase tracking-wider mb-1">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-[#EC4899] uppercase tracking-wider mb-1">
                   <Lock className="w-3.5 h-3.5" /> Direct Owner Payment Checkout
                 </div>
                 <h3 className="text-2xl font-black text-white">{selectedArena.title}</h3>
@@ -3828,11 +3990,11 @@ export default function WinDeclareApp() {
                   </div>
                   <div className="flex justify-between items-center text-gray-300">
                     <span className="font-semibold text-gray-400">⏰ Selected Slots ({selectedSlots.length || 1}):</span>
-                    <span className="font-mono font-bold text-amber-400 truncate max-w-[200px]">{slotsStr}</span>
+                    <span className="font-mono font-bold text-[#EC4899] truncate max-w-[200px]">{slotsStr}</span>
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-gray-800/80">
                     <span className="font-extrabold text-white text-sm">Total Amount Payable:</span>
-                    <span className="text-xl font-black text-amber-400 font-mono">₹{totalAmount}</span>
+                    <span className="text-xl font-black text-[#EC4899] font-mono">₹{totalAmount}</span>
                   </div>
                 </div>
               </div>
@@ -3847,13 +4009,13 @@ export default function WinDeclareApp() {
                   <img 
                     src={selectedArena.ownerQrCodeUrl || selectedArena.qr_code_url || `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=upi://pay?pa=${encodeURIComponent(selectedArena.ownerUpiId || selectedArena.upiId || 'owner@okaxis')}`} 
                     alt="Owner Payment QR" 
-                    className="w-48 h-48 rounded-2xl bg-white p-2 border border-amber-500/20 shadow-xl object-contain"
+                    className="w-48 h-48 rounded-2xl bg-white p-2 border border-pink-500/20 shadow-xl object-contain"
                   />
                 </div>
 
                 {/* c) Owner's UPI ID with Copy UPI ID button */}
                 <div className="flex items-center justify-between gap-2 bg-[#0e1320] border border-gray-800 p-3 rounded-xl">
-                  <span className="text-xs font-mono font-bold text-amber-400 truncate">
+                  <span className="text-xs font-mono font-bold text-[#EC4899] truncate">
                     {selectedArena.ownerUpiId || selectedArena.upiId || 'owner@okaxis'}
                   </span>
                   <button
@@ -3863,7 +4025,7 @@ export default function WinDeclareApp() {
                       navigator.clipboard.writeText(upi);
                       showToast('✓ Copied UPI ID: ' + upi);
                     }}
-                    className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-400 text-xs font-extrabold rounded-lg transition whitespace-nowrap"
+                    className="px-3 py-1.5 bg-pink-500/20 hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899]/30 border border-pink-500/40 text-[#EC4899] text-xs font-extrabold rounded-lg transition whitespace-nowrap"
                   >
                     Copy UPI ID
                   </button>
@@ -3976,12 +4138,12 @@ export default function WinDeclareApp() {
             <div className="space-y-6">
               <div className="flex items-center justify-between border-b border-gray-800 pb-4">
                 <div className="flex items-center gap-2.5">
-                  <div className="bg-gradient-to-tr from-amber-400 to-orange-500 p-2 rounded-xl text-black font-black shadow-lg">
+                  <div className="bg-gradient-to-tr from-[#0EA5E9] to-[#EC4899] p-2 rounded-xl text-black font-black shadow-lg">
                     <Building2 className="w-4 h-4" />
                   </div>
                   <div>
                     <h3 className="font-extrabold text-white text-sm leading-tight">Owner Portal</h3>
-                    <p className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">WinDeclare Partner</p>
+                    <p className="text-[10px] text-[#EC4899] font-bold uppercase tracking-wider">WinDeclare Partner</p>
                   </div>
                 </div>
                 <button
@@ -3997,46 +4159,46 @@ export default function WinDeclareApp() {
                 <button
                   onClick={() => { setOwnerTab('calendar'); setIsOwnerDrawerOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
-                    ownerTab === 'calendar' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                    ownerTab === 'calendar' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black shadow-lg shadow-pink-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                   }`}
                 >
-                  <Calendar className="w-4 h-4 text-amber-400" /> Daily Calendar & Offline
+                  <Calendar className="w-4 h-4 text-[#EC4899]" /> Daily Calendar & Offline
                 </button>
 
                 <button
                   onClick={() => { setOwnerTab('listings'); setShowAddTurfForm(false); setIsOwnerDrawerOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
-                    ownerTab === 'listings' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                    ownerTab === 'listings' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black shadow-lg shadow-pink-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                   }`}
                 >
-                  <LayoutDashboard className="w-4 h-4 text-amber-400" /> Listings Manager
+                  <LayoutDashboard className="w-4 h-4 text-[#EC4899]" /> Listings Manager
                 </button>
 
                 <button
                   onClick={() => { setOwnerTab('pricing'); setIsOwnerDrawerOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
-                    ownerTab === 'pricing' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                    ownerTab === 'pricing' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black shadow-lg shadow-pink-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                   }`}
                 >
-                  <IndianRupee className="w-4 h-4 text-amber-400" /> Slot Pricing
+                  <IndianRupee className="w-4 h-4 text-[#EC4899]" /> Slot Pricing
                 </button>
 
                 <button
                   onClick={() => { setOwnerTab('bookings'); setIsOwnerDrawerOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
-                    ownerTab === 'bookings' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                    ownerTab === 'bookings' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black shadow-lg shadow-pink-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                   }`}
                 >
-                  <Clock className="w-4 h-4 text-amber-400" /> Bookings Ledger
+                  <Clock className="w-4 h-4 text-[#EC4899]" /> Bookings Ledger
                 </button>
 
                 <button
                   onClick={() => { setOwnerTab('account'); setIsOwnerDrawerOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
-                    ownerTab === 'account' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                    ownerTab === 'account' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black shadow-lg shadow-pink-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
                   }`}
                 >
-                  <User className="w-4 h-4 text-amber-400" /> My Account
+                  <User className="w-4 h-4 text-[#EC4899]" /> My Account
                 </button>
               </nav>
             </div>
@@ -4044,7 +4206,7 @@ export default function WinDeclareApp() {
             <div className="border-t border-gray-800 pt-4 space-y-2">
               <button 
                 onClick={() => { setView('browse'); setIsOwnerDrawerOpen(false); showToast('Switched to Player View ⚽'); }}
-                className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-gray-400 hover:text-amber-400 bg-gray-900/50 hover:bg-gray-900 rounded-xl transition"
+                className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-gray-400 hover:text-[#EC4899] bg-gray-900/50 hover:bg-gray-900 rounded-xl transition"
               >
                 <LogOut className="w-4 h-4" /> Switch to Player Portal
               </button>
@@ -4058,18 +4220,18 @@ export default function WinDeclareApp() {
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#161b22] border border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-[#EC4899] shrink-0">
                 <ShieldCheck className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-lg font-extrabold text-white">Cancellation Policy Notice</h3>
-                <p className="text-xs text-amber-400 font-medium">Please review before proceeding</p>
+                <p className="text-xs text-[#EC4899] font-medium">Please review before proceeding</p>
               </div>
             </div>
 
             <div className="bg-[#080c14] border border-gray-800 rounded-xl p-4 mb-6">
               <p className="text-xs text-gray-300 leading-relaxed">
-                Bookings for this venue are <strong className="text-amber-400">NON-REFUNDABLE</strong> once confirmed unless specified otherwise by the venue owner. Are you sure you want to proceed?
+                Bookings for this venue are <strong className="text-[#EC4899]">NON-REFUNDABLE</strong> once confirmed unless specified otherwise by the venue owner. Are you sure you want to proceed?
               </p>
             </div>
 
@@ -4084,9 +4246,9 @@ export default function WinDeclareApp() {
               <button
                 type="button"
                 onClick={handleConfirmRefundNoticeAndPay}
-                className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-amber-500/20"
+                className="flex-1 py-3 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/20"
               >
-                Proceed to Pay
+                Pay via Paytm / UPI
               </button>
             </div>
           </div>

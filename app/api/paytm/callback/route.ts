@@ -17,8 +17,8 @@ export async function POST(request: Request) {
     const orderId = params.ORDERID;
     const respCode = params.RESPCODE;
 
-    const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const baseUrl = origin.startsWith('http') ? origin : 'http://localhost:3000';
+    const origin = request.headers.get('origin');
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (origin && origin.startsWith('http') ? origin : 'https://win-declare.vercel.app');
 
     const isSuccess = respCode === '01' || (status === 'TXN_SUCCESS' && respCode === '01');
 
@@ -61,14 +61,14 @@ export async function POST(request: Request) {
     }
   } catch (error: any) {
     console.error("CRITICAL CALLBACK EXCEPTION:", error);
-    const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const baseUrl = origin.startsWith('http') ? origin : 'http://localhost:3000';
+    const origin = request.headers.get('origin');
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (origin && origin.startsWith('http') ? origin : 'https://win-declare.vercel.app');
     return NextResponse.redirect(`${baseUrl}/?booking=error#profile-bookings`, 303);
   }
 }
 
 export async function GET(request: Request) {
-  const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-  const baseUrl = origin.startsWith('http') ? origin : 'http://localhost:3000';
+  const origin = request.headers.get('origin');
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (origin && origin.startsWith('http') ? origin : 'https://win-declare.vercel.app');
   return NextResponse.redirect(`${baseUrl}/`, 303);
 }

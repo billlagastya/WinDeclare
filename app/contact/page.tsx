@@ -16,7 +16,7 @@ export default function ContactPage() {
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-12">
         <div className="text-center mb-10">
-          <span className="text-xs font-bold text-amber-400 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20 inline-block mb-3">
+          <span className="text-xs font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20 inline-block mb-3">
             Customer Support & Inquiries
           </span>
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">Contact Us</h1>
@@ -29,7 +29,7 @@ export default function ContactPage() {
           {/* Card 1: Legal Entity Info */}
           <div className="bg-[#161b22] border border-gray-800 rounded-2xl p-6 flex flex-col justify-between">
             <div>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-[#EC4899] mb-4">
                 <Building className="w-5 h-5" />
               </div>
               <h2 className="text-lg font-bold text-white mb-2">Legal Business Entity</h2>
@@ -40,7 +40,7 @@ export default function ContactPage() {
                 </p>
                 <p>
                   <span className="text-gray-400">Business Structure:</span>{' '}
-                  <span className="text-amber-400 font-medium">Sole Proprietorship</span>
+                  <span className="text-[#EC4899] font-medium">Sole Proprietorship</span>
                 </p>
                 <p>
                   <span className="text-gray-400">Brand Name:</span>{' '}
@@ -59,14 +59,14 @@ export default function ContactPage() {
             <h2 className="text-lg font-bold text-white mb-4">Get In Touch</h2>
 
             <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-gray-900 border border-gray-800 text-amber-400 shrink-0">
+              <div className="p-2 rounded-lg bg-gray-900 border border-gray-800 text-[#EC4899] shrink-0">
                 <Mail className="w-4 h-4" />
               </div>
               <div>
                 <p className="text-xs text-gray-400">Official Support Email</p>
                 <a 
                   href="mailto:Kondrashravankumar@gmail.com" 
-                  className="text-sm font-semibold text-white hover:text-amber-400 transition"
+                  className="text-sm font-semibold text-white hover:text-[#EC4899] transition"
                 >
                   Kondrashravankumar@gmail.com
                 </a>
@@ -74,14 +74,14 @@ export default function ContactPage() {
             </div>
 
             <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-gray-900 border border-gray-800 text-amber-400 shrink-0">
+              <div className="p-2 rounded-lg bg-gray-900 border border-gray-800 text-[#EC4899] shrink-0">
                 <Phone className="w-4 h-4" />
               </div>
               <div>
                 <p className="text-xs text-gray-400">Contact Phone / WhatsApp</p>
                 <a 
                   href="tel:+919505737751" 
-                  className="text-sm font-semibold text-white hover:text-amber-400 transition"
+                  className="text-sm font-semibold text-white hover:text-[#EC4899] transition"
                 >
                   +91 9505737751
                 </a>
@@ -89,7 +89,7 @@ export default function ContactPage() {
             </div>
 
             <div className="flex items-start gap-3">
-              <div className="p-2 rounded-lg bg-gray-900 border border-gray-800 text-amber-400 shrink-0">
+              <div className="p-2 rounded-lg bg-gray-900 border border-gray-800 text-[#EC4899] shrink-0">
                 <MapPin className="w-4 h-4" />
               </div>
               <div>

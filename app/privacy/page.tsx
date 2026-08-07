@@ -15,7 +15,7 @@ export default function PrivacyPage() {
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-12">
         <div className="border-b border-gray-800 pb-6 mb-8">
-          <span className="text-xs font-bold text-amber-400 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20 inline-block mb-3">
+          <span className="text-xs font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20 inline-block mb-3">
             Data Protection & Privacy
           </span>
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">Privacy Policy</h1>
@@ -29,7 +29,7 @@ export default function PrivacyPage() {
               1. Platform & Entity Disclosure
             </h2>
             <p>
-              This Privacy Policy explains how <strong className="text-white">WinDeclare</strong> (&quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;), operated by <strong className="text-amber-400 font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship), collects, uses, and safeguards user information when you use our web application to book sports venues.
+              This Privacy Policy explains how <strong className="text-white">WinDeclare</strong> (&quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;), operated by <strong className="text-[#EC4899] font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship), collects, uses, and safeguards user information when you use our web application to book sports venues.
             </p>
           </section>
 

@@ -13,10 +13,8 @@ export default function Footer({ onOpenAdmin }: FooterProps) {
     <footer className="w-full border-t border-gray-800 bg-black text-gray-400 py-8 px-4">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-center md:text-left">
         <div>
-          <Link href="/" className="font-semibold text-white text-base flex items-center justify-center md:justify-start gap-2 hover:text-amber-400 transition">
-            <span className="bg-amber-500 p-1 rounded text-black inline-flex items-center">
-              <Trophy className="w-4 h-4 fill-black stroke-black" />
-            </span>
+          <Link href="/" className="font-semibold text-white text-base flex items-center justify-center md:justify-start gap-2 hover:text-[#EC4899] transition">
+            <img src="/logo.png" alt="WinDeclare" className="w-7 h-7 object-contain" />
             WinDeclare
           </Link>
           <p className="text-xs text-gray-400 mt-2">
@@ -26,10 +24,10 @@ export default function Footer({ onOpenAdmin }: FooterProps) {
 
         <div className="text-xs text-gray-400 flex flex-col items-center md:items-end gap-3">
           <div className="flex flex-wrap justify-center md:justify-end gap-4 sm:gap-6 font-semibold text-gray-300">
-            <Link href="/contact" className="hover:text-amber-400 transition">Contact Us</Link>
-            <Link href="/terms" className="hover:text-amber-400 transition">Terms & Conditions</Link>
-            <Link href="/privacy" className="hover:text-amber-400 transition">Privacy Policy</Link>
-            <Link href="/cancellation-policy" className="hover:text-amber-400 transition">Refund & Cancellation</Link>
+            <Link href="/contact" className="hover:text-[#EC4899] transition">Contact Us</Link>
+            <Link href="/terms" className="hover:text-[#EC4899] transition">Terms & Conditions</Link>
+            <Link href="/privacy" className="hover:text-[#EC4899] transition">Privacy Policy</Link>
+            <Link href="/cancellation-policy" className="hover:text-[#EC4899] transition">Refund & Cancellation</Link>
             {onOpenAdmin && (
               <button 
                 type="button"

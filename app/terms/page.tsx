@@ -15,7 +15,7 @@ export default function TermsPage() {
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-12">
         <div className="border-b border-gray-800 pb-6 mb-8">
-          <span className="text-xs font-bold text-amber-400 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20 inline-block mb-3">
+          <span className="text-xs font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20 inline-block mb-3">
             Legal Agreement
           </span>
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">Terms & Conditions</h1>
@@ -29,7 +29,7 @@ export default function TermsPage() {
               1. Ownership & Business Structure
             </h2>
             <p>
-              The sports turf and arena booking platform <strong className="text-white">WinDeclare</strong> (&quot;Website&quot;, &quot;Platform&quot;, &quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;) is entirely owned and operated by <strong className="text-amber-400 font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship), registered in Secunderabad, Telangana, India.
+              The sports turf and arena booking platform <strong className="text-white">WinDeclare</strong> (&quot;Website&quot;, &quot;Platform&quot;, &quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;) is entirely owned and operated by <strong className="text-[#EC4899] font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship), registered in Secunderabad, Telangana, India.
             </p>
             <p className="mt-3">
               By accessing or using WinDeclare to browse or book sports grounds, box cricket turfs, football fields, or badminton courts, you agree to be bound by these Terms & Conditions.
@@ -76,7 +76,7 @@ export default function TermsPage() {
               Individual turf owners and venue managers set the specific cancellation, modification, and refund terms for their respective grounds.
             </p>
             <p className="mt-3">
-              Unless explicitly declared refundable by a specific venue owner, confirmed slot bookings are non-refundable. Please review our <a href="/cancellation-policy" className="text-amber-400 underline font-medium">Refund & Cancellation Policy</a> prior to completing your transaction.
+              Unless explicitly declared refundable by a specific venue owner, confirmed slot bookings are non-refundable. Please review our <a href="/cancellation-policy" className="text-[#EC4899] underline font-medium">Refund & Cancellation Policy</a> prior to completing your transaction.
             </p>
           </section>
 

@@ -16,7 +16,7 @@ export default function CancellationPolicyPage() {
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-12">
         <div className="border-b border-gray-800 pb-6 mb-8">
-          <span className="text-xs font-bold text-amber-400 uppercase tracking-widest bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20 inline-block mb-3">
+          <span className="text-xs font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20 inline-block mb-3">
             Cashfree Compliance Policy
           </span>
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">Refund & Cancellation Policy</h1>
@@ -30,13 +30,13 @@ export default function CancellationPolicyPage() {
               1. Business Ownership & Policy Scope
             </h2>
             <p>
-              This Refund & Cancellation Policy applies to all slot bookings, venue rentals, and payment transactions conducted on <strong className="text-white">WinDeclare</strong>, operated by <strong className="text-amber-400 font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship).
+              This Refund & Cancellation Policy applies to all slot bookings, venue rentals, and payment transactions conducted on <strong className="text-white">WinDeclare</strong>, operated by <strong className="text-[#EC4899] font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship).
             </p>
           </section>
 
           {/* Core Cancellation Rules */}
           <section className="bg-[#161b22] border border-gray-800 rounded-2xl p-6">
-            <div className="flex items-center gap-2 text-amber-400 font-bold mb-3">
+            <div className="flex items-center gap-2 text-[#EC4899] font-bold mb-3">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <h2 className="text-lg text-white">2. Venue Owner Cancellation Rules</h2>
             </div>
@@ -45,7 +45,7 @@ export default function CancellationPolicyPage() {
             </p>
             <ul className="list-disc list-inside space-y-2 mt-3 text-gray-300">
               <li>
-                <strong className="text-white">Standard Policy:</strong> Bookings for sports venues are strictly <span className="text-amber-400 font-semibold">NON-REFUNDABLE</span> once confirmed, unless specified otherwise by the respective venue owner prior to booking.
+                <strong className="text-white">Standard Policy:</strong> Bookings for sports venues are strictly <span className="text-[#EC4899] font-semibold">NON-REFUNDABLE</span> once confirmed, unless specified otherwise by the respective venue owner prior to booking.
               </li>
               <li>
                 <strong className="text-white">Pre-Payment Disclosure:</strong> Refund terms and venue rules are explicitly disclosed to users before completing payment checkout.
@@ -57,7 +57,7 @@ export default function CancellationPolicyPage() {
           </section>
 
           {/* Refund Timeline (Cashfree Standard) */}
-          <section className="bg-[#161b22] border border-amber-500/30 rounded-2xl p-6 bg-gradient-to-b from-[#161b22] to-[#12161f]">
+          <section className="bg-[#161b22] border border-pink-500/30 rounded-2xl p-6 bg-gradient-to-b from-[#161b22] to-[#12161f]">
             <div className="flex items-center gap-2 text-emerald-400 font-bold mb-3">
               <RefreshCw className="w-5 h-5 shrink-0" />
               <h2 className="text-lg text-white">3. Refund Processing & Gateway Timelines</h2>
@@ -69,7 +69,7 @@ export default function CancellationPolicyPage() {
               &quot;Approved refunds, if granted by venue owners, will be processed back to the original payment source within 5 to 7 business days via Cashfree.&quot;
             </div>
             <div className="mt-4 flex items-center gap-3 text-xs text-gray-400">
-              <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+              <Clock className="w-4 h-4 text-[#EC4899] shrink-0" />
               <span>Standard bank settlement cycles apply. Once initiated, refund status can be tracked via your payment receipt or bank statement.</span>
             </div>
           </section>
@@ -77,7 +77,7 @@ export default function CancellationPolicyPage() {
           {/* Refund Requests & Assistance */}
           <section className="bg-[#161b22] border border-gray-800 rounded-2xl p-6">
             <h2 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-amber-400" />
+              <ShieldCheck className="w-5 h-5 text-[#EC4899]" />
               4. Support & Refund Claims Assistance
             </h2>
             <p>

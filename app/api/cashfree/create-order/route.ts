@@ -5,10 +5,51 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { ground_id, total_amount, customer_details, booking_id } = body;
+    const { ground_id, total_amount, customer_details, booking_id, booking_date, slots } = body;
 
     if (!ground_id || !total_amount) {
       return NextResponse.json({ error: "Missing required fields (ground_id or total_amount)" }, { status: 400 });
+    }
+
+    // Double-Booking Check: Verify selected slots are not already active ('confirmed' or 'booked')
+    if (booking_date && Array.isArray(slots) && slots.length > 0) {
+      const gidStr = String(ground_id);
+      const isUuid = typeof ground_id === 'string' && ground_id.includes('-');
+      let query = supabase
+        .from('bookings')
+        .select('slots')
+        .eq('booking_date', booking_date)
+        .in('status', ['confirmed', 'booked']);
+
+      if (isUuid) {
+        query = query.eq('ground_id', ground_id);
+      } else {
+        query = query.or(`arena_id.eq.${Number(ground_id)},ground_id.eq.${ground_id}`);
+      }
+
+      const { data: existingBookings, error: checkErr } = await query;
+      if (!checkErr && existingBookings && existingBookings.length > 0) {
+        const takenSlots = new Set<string>();
+        existingBookings.forEach((b: any) => {
+          let bSlots: string[] = [];
+          if (Array.isArray(b.slots)) {
+            bSlots = b.slots.map((s: any) => typeof s === 'string' ? s : s.time);
+          } else if (typeof b.slots === 'string') {
+            bSlots = b.slots.split(',').map((s: string) => s.trim());
+          }
+          bSlots.forEach((s: string) => {
+            if (s) takenSlots.add(s);
+          });
+        });
+
+        const isConflict = slots.some((s: string) => takenSlots.has(s));
+        if (isConflict) {
+          return NextResponse.json(
+            { error: "Slot already booked by another user." },
+            { status: 409 }
+          );
+        }
+      }
     }
 
     // 1. Query ground/arena details safely from Supabase

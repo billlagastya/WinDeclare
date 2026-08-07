@@ -16,7 +16,7 @@ export default function RootLayout({
       lang="en"
       className="dark h-full antialiased"
     >
-      <body className="min-h-full flex flex-col bg-[#0d1117] text-gray-100 selection:bg-amber-500 selection:text-black">
+      <body className="min-h-full flex flex-col bg-[#0d1117] text-gray-100 selection:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] selection:text-black">
         {children}
       </body>
     </html>
