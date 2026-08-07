@@ -24,6 +24,7 @@ const isUuid = (str: string) =>
 
 export async function POST(request: Request) {
   try {
+    console.log("SERVICE_ROLE_KEY_PRESENT:", !!process.env.SUPABASE_SERVICE_ROLE_KEY, "LENGTH:", (process.env.SUPABASE_SERVICE_ROLE_KEY || '').length);
     // Safely parse incoming data as URLSearchParams or FormData
     const text = await request.text();
     const searchParams = new URLSearchParams(text);
