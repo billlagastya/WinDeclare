@@ -1175,20 +1175,17 @@ export default function WinDeclareApp() {
     const bookingMessage = `Hi! I would like to book ${selectedArena.title}.\n📅 Date: ${selectedDateStr}\n⏰ Slots: ${slotsStr}\n💰 Total Amount: ₹${totalAmount}\n[Free Tier Direct Booking Request]`;
     const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(bookingMessage)}`;
 
-    const recordsToInsert = selectedSlots.map(s => {
-      const isUuid = typeof selectedArena.id === 'string' && selectedArena.id.includes('-');
-      return {
-        ground_id: isUuid ? selectedArena.id : null,
-        arena_id: isUuid ? null : Number(selectedArena.id),
-        user_id: currentUser.id,
-        booking_date: formattedIsoDate,
-        slots: [s.time],
-        total_amount: totalAmount,
-        status: 'whatsapp_pending',
-        payment_status: 'whatsapp_pending',
-        created_at: new Date().toISOString()
-      };
-    });
+    const recordsToInsert = selectedSlots.map(s => ({
+      ground_id: String(selectedArena.id),
+      user_id: currentUser.id,
+      booking_date: formattedIsoDate,
+      slots: [s.time],
+      total_amount: totalAmount,
+      status: 'whatsapp_pending',
+      payment_status: 'whatsapp_pending',
+      booking_type: 'online',
+      created_at: new Date().toISOString()
+    }));
 
     console.log("Insert Payload (recordsToInsert):", recordsToInsert);
 
@@ -1255,18 +1252,16 @@ export default function WinDeclareApp() {
     const totalAmount = totalPrice;
     const generatedBookingId = `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
-    // Insert pending booking record into Supabase bookings table before initiating Cashfree payment
-    const isUuid = typeof selectedArena.id === 'string' && selectedArena.id.includes('-');
     const recordsToInsert = selectedSlots.map(s => ({
       booking_id: generatedBookingId,
-      ground_id: isUuid ? selectedArena.id : null,
-      arena_id: isUuid ? null : Number(selectedArena.id),
+      ground_id: String(selectedArena.id),
       user_id: currentUser.id,
       booking_date: formattedIsoDate,
       slots: [s.time],
       total_amount: totalAmount,
       status: 'pending',
       payment_status: 'pending',
+      booking_type: 'online',
       created_at: new Date().toISOString()
     }));
 
@@ -2995,18 +2990,11 @@ export default function WinDeclareApp() {
                                 try {
                                   await supabase.from('bookings').insert([{
                                     booking_id: offlineBooking.id,
-                                    arena_id: isUuid ? null : Number(activeOwnerTurf.id),
-                                    ground_id: isUuid ? activeOwnerTurf.id : Number(activeOwnerTurf.id),
-                                    arena_title: offlineBooking.arenaTitle,
+                                    ground_id: String(activeOwnerTurf.id),
                                     user_id: currentUser?.id || '',
                                     booking_date: targetDateStr,
-                                    date: offlineBooking.date,
-                                    date_index: offlineBooking.dateIndex,
                                     slots: selectedTimeStrings,
-                                    amount: offlineBooking.amount,
-                                    user_contact: offlineBooking.userContact,
-                                    plan_used: offlineBooking.planUsed,
-                                    payment_qr_used: offlineBooking.paymentQrUsed,
+                                    total_amount: offlineBooking.amount,
                                     booking_type: 'offline',
                                     payment_status: 'offline_cash',
                                     status: 'booked',
@@ -4051,23 +4039,15 @@ export default function WinDeclareApp() {
                   const slotsToLock = selectedSlots.length > 0 ? selectedSlots : [{ time: slotsStr, price: totalAmount }];
 
                   const recordsToInsert = slotsToLock.map(s => ({
-                    arena_id: selectedGround.id,
-                    user_id: currentUser?.id || '',
-                    slot_time: s.time,
-                    status: 'whatsapp_pending',
-                    booking_date: formattedIsoDate,
                     booking_id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-                    ground_id: Number(selectedGround.id),
-                    arena_title: selectedGround.title,
-                    date: selectedDate,
-                    date_index: selectedDateIndex,
-                    slots: s.time,
-                    amount: s.price,
+                    ground_id: String(selectedGround.id),
+                    user_id: currentUser?.id || '',
+                    booking_date: formattedIsoDate,
+                    slots: [s.time],
                     total_amount: totalAmount,
-                    user_contact: currentUser?.phone || currentUser?.email || 'Player Session',
-                    plan_used: selectedGround.plan || 'subscription',
-                    payment_qr_used: selectedGround.ownerUpiId || 'owner@okaxis',
+                    status: 'whatsapp_pending',
                     payment_status: 'whatsapp_pending',
+                    booking_type: 'online',
                     created_at: new Date().toISOString()
                   }));
 
@@ -4092,7 +4072,7 @@ export default function WinDeclareApp() {
                     dateIndex: selectedDateIndex,
                     slots: slotsStr,
                     amount: totalAmount,
-                    userContact: recordsToInsert[0].user_contact,
+                    userContact: currentUser?.phone || currentUser?.email || 'Player Session',
                     user_id: currentUser?.id || '',
                     planUsed: selectedGround.plan || 'subscription',
                     paymentQrUsed: selectedGround.ownerUpiId || 'owner@okaxis',

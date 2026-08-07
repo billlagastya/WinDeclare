@@ -1,6 +1,17 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 import { PaytmChecksum } from '@/lib/paytmchecksum';
+const getBaseUrl = (req: Request) => {
+  // Check headers to detect if running on localhost vs production
+  const host = req.headers.get('host');
+  if (host) {
+    const protocol = host.includes('localhost') ? 'http' : 'https';
+    return `${protocol}://${host}`;
+  }
+  // Fallback to environment variable or hardcoded domain
+  const rawEnvUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://win-declare.vercel.app';
+  return rawEnvUrl.replace(/\[\vert{}\]|\(\vert{}\)/g, '').replace(/\/$/, '');
+};
 
 export async function POST(request: Request) {
   try {
@@ -82,8 +93,7 @@ export async function POST(request: Request) {
     const orderId = booking_id || `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const customerId = customer_details?.customer_id || `CUST_${Date.now()}`;
 
-    const origin = request.headers.get('origin');
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (origin && origin.startsWith('http') ? origin : 'https://win-declare.vercel.app');
+    const baseUrl = getBaseUrl(request);
     const callbackUrl = `${baseUrl}/api/paytm/callback`;
 
     const websiteName = (paytmEnv === 'STAGE' || paytmEnv === 'STAGING') ? 'WEBSTAGING' : (website || 'DEFAULT');
