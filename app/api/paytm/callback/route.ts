@@ -23,8 +23,6 @@ const isUuid = (str: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
 export async function POST(request: Request) {
-  const baseUrl = getBaseUrl(request);
-
   try {
     // Safely parse incoming data as URLSearchParams or FormData
     const text = await request.text();
@@ -42,8 +40,9 @@ export async function POST(request: Request) {
 
     const isSuccess = respCode === '01' || (status === 'TXN_SUCCESS' && respCode === '01');
 
-    if (isSuccess) {
-      if (orderId) {
+    // 1. Await DB update strictly first
+    if (orderId) {
+      if (isSuccess) {
         let query = supabaseAdmin
           .from('bookings')
           .update({ 
@@ -58,19 +57,13 @@ export async function POST(request: Request) {
         }
 
         const { data, error: dbError } = await query.select();
-
-        console.log("LOCAL CALLBACK UPDATE RESULT:", { orderId, error: dbError, data });
+        console.log("CALLBACK DB UPDATE RESULT:", { orderId, error: dbError, data });
 
         if (dbError) {
           console.error("Supabase booking update error in callback:", dbError);
-          return NextResponse.redirect(`${baseUrl}/?booking=error&reason=db_update_failed#profile-bookings`, 303);
         }
-      }
-
-      return NextResponse.redirect(`${baseUrl}/?booking=success&orderId=${orderId}#profile-bookings`, 303);
-    } else {
-      console.log("Payment unsuccessful or cancelled:", params.RESPMSG);
-      if (orderId) {
+      } else {
+        console.log("Payment unsuccessful or cancelled:", params.RESPMSG);
         let query = supabaseAdmin
           .from('bookings')
           .update({
@@ -86,19 +79,24 @@ export async function POST(request: Request) {
         }
 
         const { data, error: dbError } = await query.select();
-
-        console.log("LOCAL CALLBACK CANCEL RESULT:", { orderId, error: dbError, data });
+        console.log("CALLBACK DB CANCEL RESULT:", { orderId, error: dbError, data });
 
         if (dbError) {
           console.error("Supabase booking cancel error in callback:", dbError);
-          return NextResponse.redirect(`${baseUrl}/?booking=error&reason=db_update_failed#profile-bookings`, 303);
         }
       }
-
-      return NextResponse.redirect(`${baseUrl}/?booking=cancelled&orderId=${orderId}#profile-bookings`, 303);
     }
+
+    // 2. Only THEN construct and return the redirect
+    const baseUrl = getBaseUrl(request);
+    const redirectUrl = new URL('/#profile-bookings', baseUrl);
+    redirectUrl.searchParams.set('booking', isSuccess ? 'success' : 'failed');
+    redirectUrl.searchParams.set('orderId', orderId || '');
+
+    return NextResponse.redirect(redirectUrl.toString(), { status: 303 });
   } catch (error: any) {
     console.error("CRITICAL CALLBACK EXCEPTION:", error);
+    const baseUrl = getBaseUrl(request);
     return NextResponse.redirect(`${baseUrl}/?booking=error#profile-bookings`, 303);
   }
 }
