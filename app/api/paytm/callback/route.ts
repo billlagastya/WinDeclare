@@ -18,10 +18,6 @@ const getBaseUrl = (req: Request) => {
   return rawEnvUrl.replace(/\[\vert{}\]|\(\vert{}\)/g, '').replace(/\/$/, '');
 };
 
-const isUuid = (str: string) =>
-  typeof str === 'string' &&
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-
 export async function POST(request: Request) {
   try {
     console.log({
@@ -57,50 +53,54 @@ export async function POST(request: Request) {
       console.log({ orderId, beforeError, before });
 
       if (isSuccess) {
-        let query = supabaseAdmin
+        const { data, error } = await supabaseAdmin
           .from('bookings')
-          .update({ 
-            status: 'confirmed', 
+          .update({
+            status: 'confirmed',
             payment_status: 'completed'
-          });
-
-        if (isUuid(orderId)) {
-          query = query.or(`booking_id.eq.${orderId},id.eq.${orderId}`);
-        } else {
-          query = query.eq('booking_id', orderId);
-        }
-
-        const { data, error } = await query.select();
+          })
+          .eq('booking_id', orderId)
+          .select();
 
         console.log('=== UPDATE RESULT ===');
         console.log({ data, error });
 
-        if (error) {
-          console.error("Supabase booking update error in callback:", error);
+        if (error || !data || data.length === 0) {
+          console.warn("Direct select update returned empty, executing update without .select()...");
+          const { error: directError } = await supabaseAdmin
+            .from('bookings')
+            .update({
+              status: 'confirmed',
+              payment_status: 'completed'
+            })
+            .eq('booking_id', orderId);
+
+          console.log('=== FALLBACK DIRECT UPDATE ERROR ===', directError);
         }
       } else {
         console.log("Payment unsuccessful or cancelled:", params.RESPMSG);
-        let query = supabaseAdmin
+        const { data, error } = await supabaseAdmin
           .from('bookings')
           .update({
             status: 'cancelled',
             payment_status: 'failed'
           })
-          .neq('status', 'confirmed');
-
-        if (isUuid(orderId)) {
-          query = query.or(`booking_id.eq.${orderId},id.eq.${orderId}`);
-        } else {
-          query = query.eq('booking_id', orderId);
-        }
-
-        const { data, error } = await query.select();
+          .eq('booking_id', orderId)
+          .select();
 
         console.log('=== UPDATE RESULT ===');
         console.log({ data, error });
 
-        if (error) {
-          console.error("Supabase booking cancel error in callback:", error);
+        if (error || !data || data.length === 0) {
+          const { error: directError } = await supabaseAdmin
+            .from('bookings')
+            .update({
+              status: 'cancelled',
+              payment_status: 'failed'
+            })
+            .eq('booking_id', orderId);
+
+          console.log('=== FALLBACK DIRECT CANCEL ERROR ===', directError);
         }
       }
 
