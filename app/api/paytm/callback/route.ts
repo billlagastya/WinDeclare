@@ -1,11 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
 const getBaseUrl = (req: Request) => {
   // Check headers to detect if running on localhost vs production
   const host = req.headers.get('host');
@@ -18,13 +13,42 @@ const getBaseUrl = (req: Request) => {
   return rawEnvUrl.replace(/\[\vert{}\]|\(\vert{}\)/g, '').replace(/\/$/, '');
 };
 
+const decodeRoleFromJwt = (jwtToken?: string) => {
+  if (!jwtToken) return 'KEY_NOT_SET';
+  try {
+    const parts = jwtToken.split('.');
+    if (parts.length < 2) return 'INVALID_JWT_FORMAT';
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    return payload.role || 'ROLE_FIELD_MISSING';
+  } catch (e) {
+    return 'DECODE_ERROR';
+  }
+};
+
 export async function POST(request: Request) {
   try {
-    console.log({
-      SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const decodedRole = decodeRoleFromJwt(process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+    console.log("=== SUPABASE RUNTIME CLIENT DIAGNOSTICS ===", {
+      SUPABASE_URL: supabaseUrl,
       SERVICE_ROLE_KEY_PRESENT: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      SERVICE_ROLE_KEY_LENGTH: process.env.SUPABASE_SERVICE_ROLE_KEY?.length
+      SERVICE_ROLE_KEY_LENGTH: process.env.SUPABASE_SERVICE_ROLE_KEY?.length || 0,
+      DECODED_JWT_ROLE: decodedRole
     });
+
+    // Create fresh un-cached admin client for callback execution
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      serviceKey,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
+    );
 
     // Safely parse incoming data as URLSearchParams or FormData
     const text = await request.text();
@@ -52,55 +76,48 @@ export async function POST(request: Request) {
       console.log('=== BEFORE UPDATE ===');
       console.log({ orderId, beforeError, before });
 
-      if (isSuccess) {
-        const { data, error } = await supabaseAdmin
-          .from('bookings')
-          .update({
-            status: 'confirmed',
-            payment_status: 'completed'
-          })
-          .eq('booking_id', orderId)
-          .select();
+      const targetStatus = isSuccess ? 'confirmed' : 'cancelled';
+      const targetPaymentStatus = isSuccess ? 'completed' : 'failed';
 
-        console.log('=== UPDATE RESULT ===');
-        console.log({ data, error });
+      const { data, error } = await supabaseAdmin
+        .from('bookings')
+        .update({
+          status: targetStatus,
+          payment_status: targetPaymentStatus
+        })
+        .eq('booking_id', orderId)
+        .select();
 
-        if (error || !data || data.length === 0) {
-          console.warn("Direct select update returned empty, executing update without .select()...");
-          const { error: directError } = await supabaseAdmin
-            .from('bookings')
-            .update({
-              status: 'confirmed',
-              payment_status: 'completed'
+      console.log('=== UPDATE RESULT ===');
+      console.log({ data, error });
+
+      // If update returned empty array, perform raw HTTP PATCH directly against PostgREST for exact status code & response diagnostics
+      if (error || !data || data.length === 0) {
+        console.warn("Direct Supabase JS update returned empty data []. Executing raw PostgREST REST API PATCH...");
+        try {
+          const patchRes = await fetch(`${supabaseUrl}/rest/v1/bookings?booking_id=eq.${encodeURIComponent(orderId)}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': serviceKey,
+              'Authorization': `Bearer ${serviceKey}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({
+              status: targetStatus,
+              payment_status: targetPaymentStatus
             })
-            .eq('booking_id', orderId);
+          });
 
-          console.log('=== FALLBACK DIRECT UPDATE ERROR ===', directError);
-        }
-      } else {
-        console.log("Payment unsuccessful or cancelled:", params.RESPMSG);
-        const { data, error } = await supabaseAdmin
-          .from('bookings')
-          .update({
-            status: 'cancelled',
-            payment_status: 'failed'
-          })
-          .eq('booking_id', orderId)
-          .select();
-
-        console.log('=== UPDATE RESULT ===');
-        console.log({ data, error });
-
-        if (error || !data || data.length === 0) {
-          const { error: directError } = await supabaseAdmin
-            .from('bookings')
-            .update({
-              status: 'cancelled',
-              payment_status: 'failed'
-            })
-            .eq('booking_id', orderId);
-
-          console.log('=== FALLBACK DIRECT CANCEL ERROR ===', directError);
+          const rawBody = await patchRes.text();
+          console.log("DIRECT POSTGREST PATCH DIAGNOSTIC RESPONSE:", {
+            status: patchRes.status,
+            statusText: patchRes.statusText,
+            headers: Object.fromEntries(patchRes.headers.entries()),
+            body: rawBody
+          });
+        } catch (rawErr) {
+          console.error("DIRECT POSTGREST PATCH EXCEPTION:", rawErr);
         }
       }
 
