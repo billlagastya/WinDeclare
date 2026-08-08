@@ -84,12 +84,12 @@ export async function initiateOnlinePayment(options: PaymentOptions): Promise<Pa
 
       // 2. Open Paytm hosted checkout view by creating and submitting a form POST
       const host = paytmEnv === 'PRODUCTION' ? 'securegw.paytm.in' : 'securestage.paytmpayments.com';
-      const actionUrl = `https://${host}/theia/api/v1/showPaymentPage?mid=${mid}&orderId=${order_id}`;
+      const paytmTxnUrl = `https://${host}/theia/api/v1/showPaymentPage?mid=${mid}&orderId=${order_id}`;
 
+      // Ensure the form is appended to the document body so both mobile browsers (iOS Safari/Android Chrome) and desktop execute the POST submit cleanly
       const form = document.createElement('form');
-      form.setAttribute('method', 'post');
-      form.setAttribute('action', actionUrl);
-      form.setAttribute('name', 'paytm_form');
+      form.method = 'POST';
+      form.action = paytmTxnUrl;
 
       const params: Record<string, string> = {
         mid: mid,
@@ -97,15 +97,13 @@ export async function initiateOnlinePayment(options: PaymentOptions): Promise<Pa
         txnToken: txnToken
       };
 
-      for (const key in params) {
-        if (params.hasOwnProperty(key)) {
-          const hiddenField = document.createElement('input');
-          hiddenField.setAttribute('type', 'hidden');
-          hiddenField.setAttribute('name', key);
-          hiddenField.setAttribute('value', params[key]);
-          form.appendChild(hiddenField);
-        }
-      }
+      Object.keys(params).forEach(key => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = key;
+        input.value = params[key];
+        form.appendChild(input);
+      });
 
       document.body.appendChild(form);
       form.submit();

@@ -79,13 +79,17 @@ interface Profile {
   role?: string;
 }
 
+const getFormattedDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const getYYYYMMDD = (dateIndex: number = 0): string => {
   const d = new Date();
   d.setDate(d.getDate() + dateIndex);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return getFormattedDate(d);
 };
 
 const parseSlotTimeToHour = (timeStr: string): number => {
@@ -107,6 +111,33 @@ const normalizeTimeString = (timeStr: string): string => {
   const min = match[2];
   const period = match[3].toUpperCase();
   return `${hour}:${min} ${period}`;
+};
+
+const extractSlotTimesFromBooking = (row: any): string[] => {
+  const result: string[] = [];
+  const rawSlots = row.slots || row.time_slot || row.slot_time || row.time;
+
+  if (Array.isArray(rawSlots)) {
+    rawSlots.forEach((s: any) => {
+      const str = typeof s === 'string' ? s : (s?.time || s?.slot_time || s?.slot);
+      const norm = normalizeTimeString(str);
+      if (norm && !result.includes(norm)) result.push(norm);
+    });
+  } else if (typeof rawSlots === 'string' && rawSlots.trim().length > 0) {
+    rawSlots.split(',').forEach((t: string) => {
+      const norm = normalizeTimeString(t);
+      if (norm && !result.includes(norm)) result.push(norm);
+    });
+  }
+
+  ['slot_time', 'time_slot', 'time'].forEach((field) => {
+    if (row[field] && typeof row[field] === 'string') {
+      const norm = normalizeTimeString(row[field]);
+      if (norm && !result.includes(norm)) result.push(norm);
+    }
+  });
+
+  return result;
 };
 
 export default function WinDeclareApp() {
@@ -556,7 +587,7 @@ export default function WinDeclareApp() {
         const { data, error } = await supabase
           .from('bookings')
           .select('*')
-          .in('status', ['confirmed', 'booked'])
+          .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked')
           .order('created_at', { ascending: false });
         console.log("DEBUG FIRST ARENA OBJECT:", arenas[0]);
         console.log("DEBUG FIRST BOOKING OBJECT:", data?.[0]);
@@ -600,25 +631,26 @@ export default function WinDeclareApp() {
           // Hydrate locked slots into bookedSlots state so slots show unavailable/disabled (BOOKED) across page refreshes
           const extractedLockedSlots: BookedSlot[] = [];
           data.forEach((item: any) => {
-            const arenaId = Number(item.arena_id || item.ground_id || item.arenaId || 1);
-            const dateIndex = Number(item.date_index ?? item.dateIndex ?? 0);
-            const slotsVal = item.slots;
-
-            if (typeof slotsVal === 'string') {
-              slotsVal.split(',').forEach((t: string) => {
-                const timeStr = t.trim();
-                if (timeStr && !extractedLockedSlots.some(s => s.arenaId === arenaId && s.dateIndex === dateIndex && s.time === timeStr)) {
-                  extractedLockedSlots.push({ arenaId, dateIndex, time: timeStr });
+            const arenaId = item.arena_id || item.ground_id || item.arenaId || 1;
+            let dateIndex = item.date_index ?? item.dateIndex;
+            if (dateIndex === undefined || dateIndex === null || item.booking_date) {
+              for (let i = 0; i < 7; i++) {
+                if (getYYYYMMDD(i) === item.booking_date) {
+                  dateIndex = i;
+                  break;
                 }
-              });
-            } else if (Array.isArray(slotsVal)) {
-              slotsVal.forEach((s: any) => {
-                const timeStr = (typeof s === 'string' ? s : s.time)?.trim();
-                if (timeStr && !extractedLockedSlots.some(s => s.arenaId === arenaId && s.dateIndex === dateIndex && s.time === timeStr)) {
-                  extractedLockedSlots.push({ arenaId, dateIndex, time: timeStr });
-                }
-              });
+              }
+              if (dateIndex === undefined || dateIndex === null) dateIndex = Number(item.date_index ?? item.dateIndex ?? 0);
+            } else {
+              dateIndex = Number(dateIndex);
             }
+            const slotTimes = extractSlotTimesFromBooking(item);
+
+            slotTimes.forEach((norm: string) => {
+              if (!extractedLockedSlots.some(s => String(s.arenaId) === String(arenaId) && s.dateIndex === dateIndex && normalizeTimeString(s.time) === norm)) {
+                extractedLockedSlots.push({ arenaId, dateIndex, time: norm, source: 'booking' });
+              }
+            });
           });
 
           setBookedSlots(extractedLockedSlots);
@@ -644,9 +676,9 @@ export default function WinDeclareApp() {
     try {
       let query = supabase
         .from('bookings')
-        .select('slots, arena_id, ground_id')
+        .select('slots, arena_id, ground_id, booking_date, slot_time, time_slot')
         .eq('booking_date', selectedDate)
-        .in('status', ['confirmed', 'booked']);
+        .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked');
 
       if (isUuid) {
         query = query.eq('ground_id', arenaId);
@@ -659,15 +691,9 @@ export default function WinDeclareApp() {
       const bookedEntries: { time: string; source: 'booking' }[] = [];
       if (data) {
         data.forEach((row: any) => {
-          let slotsArr: string[] = [];
-          if (Array.isArray(row.slots)) {
-            slotsArr = row.slots.map((s: any) => typeof s === 'string' ? s : s.time);
-          } else if (typeof row.slots === 'string') {
-            slotsArr = row.slots.split(',').map((s: string) => s.trim());
-          }
-          slotsArr.forEach((t: string) => {
-            const norm = normalizeTimeString(t);
-            if (norm && !bookedEntries.some(e => e.time === norm)) {
+          const slotTimes = extractSlotTimesFromBooking(row);
+          slotTimes.forEach((norm: string) => {
+            if (!bookedEntries.some(e => e.time === norm)) {
               bookedEntries.push({ time: norm, source: 'booking' });
             }
           });
@@ -704,7 +730,7 @@ export default function WinDeclareApp() {
     if (selectedArena?.id !== undefined && selectedArena?.id !== null) {
       fetchSlotAvailability(selectedArena.id, selectedDateIndex);
     }
-  }, [selectedArena?.id, selectedDateIndex, fetchSlotAvailability]);
+  }, [selectedArena, selectedDateIndex, fetchSlotAvailability]);
 
   // Handle Return Redirect & Hash Navigation from Paytm / Cashfree Payment Checkout
   useEffect(() => {
@@ -714,32 +740,28 @@ export default function WinDeclareApp() {
     const statusParam = urlParams.get('status');
     const msgParam = urlParams.get('msg');
     const hash = window.location.hash;
-
     if (bookingParam || hash === '#profile-bookings') {
       setProfileTab('bookings');
       setView('profile');
       if (bookingParam) {
         if (statusParam === 'success') {
-          showToast(`🎉 Paytm Payment successful for order ${bookingParam}!`);
+          showToast(`🎉 Payment successful for order ${bookingParam}!`);
         } else if (statusParam === 'failed') {
-          showToast(`❌ Paytm Payment failed: ${msgParam || 'Transaction cancelled or declined'}`);
+          showToast(`❌ Payment failed: ${msgParam || 'Transaction cancelled or declined'}`);
         } else {
           showToast(`🎉 Payment processing completed for order ${bookingParam}!`);
         }
-
-        // Auto-refresh slot availability and profile bookings on payment return
-        if (selectedArena?.id !== undefined && selectedArena?.id !== null) {
-          fetchSlotAvailability(selectedArena.id, selectedDateIndex);
-        }
       }
+      // Clear the URL so this doesn't re-trigger on every re-render/click
+      window.history.replaceState({}, '', window.location.pathname);
     }
-  }, [selectedArena?.id, selectedDateIndex, fetchSlotAvailability]);
+  }, []); // run once on mount only
 
   useEffect(() => {
     if (activeOwnerTurf?.id !== undefined && activeOwnerTurf?.id !== null) {
       fetchSlotAvailability(activeOwnerTurf.id, selectedDateIndex);
     }
-  }, [activeOwnerTurf?.id, selectedDateIndex, fetchSlotAvailability]);
+  }, [activeOwnerTurf, selectedDateIndex, fetchSlotAvailability]);
 
   // Fetch Owner Bookings joined with arenas matching owner's ID (Owner Dashboard)
   const [ownerPortalBookings, setOwnerPortalBookings] = useState<any[]>([]);
@@ -1324,9 +1346,9 @@ export default function WinDeclareApp() {
     try {
       let query = supabase
         .from('bookings')
-        .select('slots')
+        .select('slots, slot_time, time_slot')
         .eq('booking_date', targetDateStr)
-        .in('status', ['confirmed', 'booked']);
+        .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked');
 
       if (isUuid) {
         query = query.eq('ground_id', selectedArena.id);
@@ -1338,18 +1360,11 @@ export default function WinDeclareApp() {
       if (activeBookings && activeBookings.length > 0) {
         const takenSlots = new Set<string>();
         activeBookings.forEach((b: any) => {
-          let bSlots: string[] = [];
-          if (Array.isArray(b.slots)) {
-            bSlots = b.slots.map((s: any) => typeof s === 'string' ? s : s.time);
-          } else if (typeof b.slots === 'string') {
-            bSlots = b.slots.split(',').map((s: string) => s.trim());
-          }
-          bSlots.forEach((s: string) => {
-            if (s) takenSlots.add(s);
-          });
+          const slotTimes = extractSlotTimesFromBooking(b);
+          slotTimes.forEach((norm: string) => takenSlots.add(norm));
         });
 
-        const hasConflict = selectedTimeStrings.some(s => takenSlots.has(s));
+        const hasConflict = selectedTimeStrings.some(s => takenSlots.has(normalizeTimeString(s)));
         if (hasConflict) {
           alert('Slot already booked by another user.');
           showToast('❌ Slot already booked by another user.');
@@ -1425,9 +1440,7 @@ export default function WinDeclareApp() {
     setIsProcessingPayment(true);
 
     const activeDate = datesList[selectedDateIndex];
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + selectedDateIndex);
-    const selectedDate = targetDate.toISOString().split('T')[0];
+    const selectedDate = getYYYYMMDD(selectedDateIndex);
 
     const slotsToInsert = selectedSlots.length > 0 
       ? selectedSlots 
@@ -2924,9 +2937,9 @@ export default function WinDeclareApp() {
                                 try {
                                   let query = supabase
                                     .from('bookings')
-                                    .select('slots')
+                                    .select('slots, slot_time, time_slot')
                                     .eq('booking_date', targetDateStr)
-                                    .in('status', ['confirmed', 'booked']);
+                                    .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked');
 
                                   if (isUuid) {
                                     query = query.eq('ground_id', activeOwnerTurf.id);
@@ -2938,18 +2951,11 @@ export default function WinDeclareApp() {
                                   if (activeBookings && activeBookings.length > 0) {
                                     const takenSlots = new Set<string>();
                                     activeBookings.forEach((b: any) => {
-                                      let bSlots: string[] = [];
-                                      if (Array.isArray(b.slots)) {
-                                        bSlots = b.slots.map((s: any) => typeof s === 'string' ? s : s.time);
-                                      } else if (typeof b.slots === 'string') {
-                                        bSlots = b.slots.split(',').map((s: string) => s.trim());
-                                      }
-                                      bSlots.forEach((s: string) => {
-                                        if (s) takenSlots.add(s);
-                                      });
+                                      const slotTimes = extractSlotTimesFromBooking(b);
+                                      slotTimes.forEach((norm: string) => takenSlots.add(norm));
                                     });
 
-                                    const hasConflict = selectedTimeStrings.some(s => takenSlots.has(s));
+                                    const hasConflict = selectedTimeStrings.some(s => takenSlots.has(normalizeTimeString(s)));
                                     if (hasConflict) {
                                       alert('Slot already booked by another user.');
                                       showToast('❌ Slot already booked by another user.');
