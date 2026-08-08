@@ -46,11 +46,7 @@ export async function POST(request: Request) {
         .eq('booking_date', booking_date)
         .in('status', ['confirmed', 'booked']);
 
-      if (isUuid) {
-        query = query.eq('ground_id', ground_id);
-      } else {
-        query = query.or(`arena_id.eq.${Number(ground_id)},ground_id.eq.${ground_id}`);
-      }
+      query = query.eq('ground_id', ground_id);
 
       const { data: existingBookings, error: checkErr } = await query;
       if (!checkErr && existingBookings && existingBookings.length > 0) {
@@ -93,10 +89,14 @@ export async function POST(request: Request) {
     const orderId = booking_id || `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const customerId = customer_details?.customer_id || `CUST_${Date.now()}`;
 
+    const userAgent = request.headers.get('user-agent') || '';
+    const isMobile = /mobile|iphone|ipad|android|touch/i.test(userAgent);
+    const channelId = isMobile ? 'WAP' : 'WEB';
+
     const baseUrl = getBaseUrl(request);
     const callbackUrl = `${baseUrl}/api/paytm/callback`;
 
-    const websiteName = (paytmEnv === 'STAGE' || paytmEnv === 'STAGING') ? 'WEBSTAGING' : (website || 'DEFAULT');
+    const websiteName = (paytmEnv === 'STAGE' || paytmEnv === 'STAGING') ? 'WEBSTAGING' : (website || (isMobile ? 'WAP' : 'DEFAULT'));
 
     const bodyObj = {
       requestType: "Payment",
@@ -125,7 +125,7 @@ export async function POST(request: Request) {
     const paytmParams = {
       head: {
         version: "v1",
-        channelId: "WEB",
+        channelId: channelId,
         signature: checksum,
       },
       body: bodyObj,

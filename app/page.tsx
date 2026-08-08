@@ -21,6 +21,9 @@ interface Arena {
   location: string;
   lat: number;
   lng: number;
+  latitude?: number;
+  longitude?: number;
+  calculatedDistance?: string | null;
   price: number;
   price_per_hour?: number;
   pricing_rules?: any;
@@ -178,12 +181,11 @@ export default function WinDeclareApp() {
 
   const fetchSlotOverrides = useCallback(async (arenaId: number | string) => {
     if (!arenaId) return;
-    const isUuid = typeof arenaId === 'string' && arenaId.includes('-');
     try {
       const { data } = await supabase
         .from('slot_overrides')
         .select('*')
-        .or(isUuid ? `ground_id.eq.${arenaId}` : `arena_id.eq.${Number(arenaId)}`);
+        .eq('ground_id', arenaId);
       if (data) setSlotOverrides(data);
     } catch (err) {
       console.error("Error fetching slot overrides:", err);
@@ -196,20 +198,16 @@ export default function WinDeclareApp() {
     mode: 'every' | 'today' | 'reopen',
     selectedDayStr: string
   ) => {
-    const isUuid = typeof arenaId === 'string' && arenaId.includes('-');
     const dayMap: { [key: string]: number } = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
     const dow = dayMap[selectedDayStr] ?? new Date().getDay();
-    const todayIso = new Date().toISOString().split('T')[0];
+    const todayIso = getFormattedDate(new Date());
 
     if (mode === 'reopen') {
-      let query = supabase.from('slot_overrides').delete().eq('slot_time', slotTime);
-      query = isUuid ? query.eq('ground_id', arenaId) : query.eq('arena_id', Number(arenaId));
-      await query;
+      await supabase.from('slot_overrides').delete().eq('slot_time', slotTime).eq('ground_id', arenaId);
       showToast(`✓ Re-opened slot ${slotTime}`);
     } else if (mode === 'every') {
       const record = {
-        ground_id: isUuid ? arenaId : null,
-        arena_id: isUuid ? null : Number(arenaId),
+        ground_id: arenaId,
         day_of_week: dow,
         specific_date: null,
         slot_time: slotTime
@@ -218,8 +216,7 @@ export default function WinDeclareApp() {
       showToast(`🔒 Turned off ${slotTime} for every ${selectedDayStr}`);
     } else if (mode === 'today') {
       const record = {
-        ground_id: isUuid ? arenaId : null,
-        arena_id: isUuid ? null : Number(arenaId),
+        ground_id: arenaId,
         day_of_week: null,
         specific_date: todayIso,
         slot_time: slotTime
@@ -308,11 +305,13 @@ export default function WinDeclareApp() {
   // Arenas List with Pricing Plans & Owner Payment details
   const [arenas, setArenas] = useState<Arena[]>([
     {
-      id: 1,
+      id: '162d8c3d-bfc2-40f8-a5d6-de881096cc78',
       title: 'Akshay Box Turf',
       location: 'Addagutta, Secunderabad',
       lat: 17.4399,
       lng: 78.5082,
+      latitude: 17.4399,
+      longitude: 78.5082,
       price: 800,
       rating: 4.8,
       reviews: 22,
@@ -333,6 +332,8 @@ export default function WinDeclareApp() {
       location: 'Gachibowli, Hyderabad',
       lat: 17.4401,
       lng: 78.3489,
+      latitude: 17.4401,
+      longitude: 78.3489,
       price: 500,
       rating: 4.9,
       reviews: 39,
@@ -353,6 +354,8 @@ export default function WinDeclareApp() {
       location: 'Jubilee Hills, Hyderabad',
       lat: 17.4319,
       lng: 78.4071,
+      latitude: 17.4319,
+      longitude: 78.4071,
       price: 1200,
       rating: 4.9,
       reviews: 31,
@@ -552,7 +555,7 @@ export default function WinDeclareApp() {
             const newRow = payload.new;
             const mappedBooking: Booking = {
               id: newRow.booking_id || newRow.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-              arenaId: newRow.arena_id || newRow.arenaId || 1,
+              arenaId: newRow.ground_id || newRow.groundId || 1,
               arenaTitle: newRow.arena_title || newRow.arenaTitle || 'Arena',
               date: newRow.date || 'Today',
               dateIndex: newRow.date_index ?? newRow.dateIndex ?? 0,
@@ -595,15 +598,15 @@ export default function WinDeclareApp() {
           const mapped: Booking[] = data.map((item: any) => {
             const matchedGround = arenas.find(
               (g: any) =>
-                String(g.id) === String(item.ground_id || item.arena_id || item.arenaId) ||
-                String(g.uuid || g.ground_id) === String(item.ground_id || item.arena_id || item.arenaId)
+                String(g.id) === String(item.ground_id || item.groundId) ||
+                String(g.uuid || g.ground_id) === String(item.ground_id || item.groundId)
             );
 
             const turfDisplayName = item.arena_title || item.arenaTitle || item.arena_name || item.title || matchedGround?.title || matchedGround?.name || matchedGround?.location || 'Sports Turf';
 
             return {
               id: item.booking_id || item.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-              arenaId: item.arena_id || item.ground_id || item.arenaId || 1,
+              arenaId: item.ground_id || item.groundId || 1,
               arenaTitle: turfDisplayName,
               turf_display_name: turfDisplayName,
               date: item.date || item.booking_date || '',
@@ -631,7 +634,7 @@ export default function WinDeclareApp() {
           // Hydrate locked slots into bookedSlots state so slots show unavailable/disabled (BOOKED) across page refreshes
           const extractedLockedSlots: BookedSlot[] = [];
           data.forEach((item: any) => {
-            const arenaId = item.arena_id || item.ground_id || item.arenaId || 1;
+            const arenaId = item.ground_id || item.groundId || 1;
             let dateIndex = item.date_index ?? item.dateIndex;
             if (dateIndex === undefined || dateIndex === null || item.booking_date) {
               for (let i = 0; i < 7; i++) {
@@ -669,57 +672,91 @@ export default function WinDeclareApp() {
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + dateIndex);
     const dow = targetDate.getDay();
-    const isUuid = typeof arenaId === 'string' && arenaId.includes('-');
+    const isNumeric1 = String(arenaId) === '1' || arenaId === 1;
+    const searchGroundId = isNumeric1 ? '162d8c3d-bfc2-40f8-a5d6-de881096cc78' : arenaId;
 
-    console.log("Fetching bookings for ground:", arenaId, "on date:", selectedDate);
+    console.log("Fetching bookings for ground:", searchGroundId, "on date:", selectedDate);
 
     try {
-      let query = supabase
+      // 1. Fetch confirmed bookings for target date
+      const { data } = await supabase
         .from('bookings')
-        .select('slots, arena_id, ground_id, booking_date, slot_time, time_slot')
+        .select('slots, ground_id, booking_date, slot_time, time_slot')
         .eq('booking_date', selectedDate)
+        .or(`ground_id.eq.${searchGroundId},ground_id.eq.${arenaId}`)
         .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked');
 
-      if (isUuid) {
-        query = query.eq('ground_id', arenaId);
-      } else {
-        query = query.or(`arena_id.eq.${Number(arenaId)},ground_id.eq.${arenaId}`);
-      }
-
-      const { data } = await query;
-
-      const bookedEntries: { time: string; source: 'booking' }[] = [];
-      if (data) {
-        data.forEach((row: any) => {
-          const slotTimes = extractSlotTimesFromBooking(row);
-          slotTimes.forEach((norm: string) => {
-            if (!bookedEntries.some(e => e.time === norm)) {
-              bookedEntries.push({ time: norm, source: 'booking' });
-            }
-          });
+      const extractedSlots: string[] = [];
+      if (data && data.length > 0) {
+        data.forEach((b: any) => {
+          if (Array.isArray(b.slots)) {
+            b.slots.forEach((s: any) => {
+              const str = typeof s === 'string' ? s : (s?.time || s?.slot_time || s?.slot);
+              const norm = normalizeTimeString(str);
+              if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
+            });
+          } else if (b.slots && typeof b.slots === 'string') {
+            b.slots.split(',').forEach((t: string) => {
+              const norm = normalizeTimeString(t);
+              if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
+            });
+          } else if (b.time_slot && typeof b.time_slot === 'string') {
+            const norm = normalizeTimeString(b.time_slot);
+            if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
+          } else if (b.slot_time && typeof b.slot_time === 'string') {
+            const norm = normalizeTimeString(b.slot_time);
+            if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
+          }
         });
       }
 
+      console.log("EXTRACTED BOOKED SLOTS FOR DATE:", selectedDate, extractedSlots);
+
+      // 2. Fetch custom slot overrides (e.g. owner manual blocks)
       const { data: overrides } = await supabase
         .from('slot_overrides')
         .select('slot_time')
-        .or(isUuid ? `ground_id.eq.${arenaId}` : `arena_id.eq.${Number(arenaId)}`)
+        .or(`ground_id.eq.${searchGroundId},ground_id.eq.${arenaId}`)
         .or(`day_of_week.eq.${dow},specific_date.eq.${selectedDate}`);
 
       const closedEntries: { time: string; source: 'override' }[] = [];
-      if (overrides) {
+      if (overrides && overrides.length > 0) {
         overrides.forEach((row: any) => {
           const norm = normalizeTimeString(row.slot_time);
           if (norm && !closedEntries.some(e => e.time === norm)) closedEntries.push({ time: norm, source: 'override' });
         });
       }
 
+      // 3. Safely MERGE confirmed bookings and overrides into bookedSlots state so bookings are NEVER cleared
       setBookedSlots(prev => {
-        const filtered = prev.filter(b => !(String(b.arenaId) === String(arenaId) && b.dateIndex === dateIndex));
-        const newEntries = [...bookedEntries, ...closedEntries].map(e => ({
-          arenaId, dateIndex, time: e.time, source: e.source
+        const isMatch = (bArenaId: number | string) =>
+          String(bArenaId) === String(arenaId) ||
+          String(bArenaId) === String(searchGroundId) ||
+          (isNumeric1 && (String(bArenaId) === '1' || String(bArenaId) === '162d8c3d-bfc2-40f8-a5d6-de881096cc78'));
+
+        // Keep items for other dates/arenas, or keep existing booking items if current fetch returned 0 rows
+        const otherEntries = prev.filter(b => !(isMatch(b.arenaId) && b.dateIndex === dateIndex));
+        const existingBookingsForTab = prev.filter(b => isMatch(b.arenaId) && b.dateIndex === dateIndex && b.source === 'booking');
+
+        const bookingEntries = extractedSlots.map(time => ({
+          arenaId, dateIndex, time, source: 'booking' as const
         }));
-        return [...filtered, ...newEntries];
+        const overrideEntries = closedEntries.map(e => ({
+          arenaId, dateIndex, time: e.time, source: 'override' as const
+        }));
+
+        // Retain existing hydrated bookings if current query returned 0 rows
+        const mergedBookings = bookingEntries.length > 0 ? bookingEntries : existingBookingsForTab;
+
+        // Deduplicate merged bookings and overrides
+        const finalEntries = [...mergedBookings];
+        overrideEntries.forEach(oe => {
+          if (!finalEntries.some(fe => fe.time === oe.time)) {
+            finalEntries.push(oe);
+          }
+        });
+
+        return [...otherEntries, ...finalEntries];
       });
     } catch (err) {
       console.error("Error fetching slot availability:", err);
@@ -771,23 +808,10 @@ export default function WinDeclareApp() {
     try {
       const { data, error } = await supabase
         .from('bookings')
-        .select('*, arenas!inner(*)')
-        .eq('arenas.user_id', currentUser.id);
+        .select('*, grounds!inner(*)')
+        .eq('grounds.user_id', currentUser.id);
 
-      if (error) {
-        console.warn("Owner bookings query notice (trying grounds fallback):", error.message);
-        const { data: fallbackData, error: fallbackErr } = await supabase
-          .from('bookings')
-          .select('*, grounds!inner(*)')
-          .eq('grounds.user_id', currentUser.id);
-
-        if (!fallbackErr && fallbackData) {
-          setOwnerPortalBookings(fallbackData);
-          return;
-        }
-      }
-
-      if (data) {
+      if (!error && data) {
         setOwnerPortalBookings(data);
       }
     } catch (err) {
@@ -810,8 +834,10 @@ export default function WinDeclareApp() {
           id: item.id || item.ground_id || `pending-${Date.now()}-${index}`,
           title: item.name || item.title || 'Pending Turf Arena',
           location: item.location || 'Hyderabad',
-          lat: item.lat || 17.4399,
-          lng: item.lng || 78.5082,
+          lat: Number(item.lat || item.latitude || 17.4399),
+          lng: Number(item.lng || item.longitude || 78.5082),
+          latitude: Number(item.lat || item.latitude || 17.4399),
+          longitude: Number(item.lng || item.longitude || 78.5082),
           price: item.price_per_hour || item.price || 1000,
           rating: item.rating || 5.0,
           reviews: item.reviews || 1,
@@ -837,14 +863,7 @@ export default function WinDeclareApp() {
   // Fetch Grounds directly from Supabase Database on page load
   const fetchGroundsFromSupabase = async () => {
     try {
-      let { data, error } = await supabase.from('grounds').select('*');
-      if (error || !data || data.length === 0) {
-        const { data: arenaData, error: arenaError } = await supabase.from('arenas').select('*');
-        if (!arenaError && arenaData && arenaData.length > 0) {
-          data = arenaData;
-          error = null;
-        }
-      }
+      const { data, error } = await supabase.from('grounds').select('*');
 
       if (!error && data && data.length > 0) {
         console.log("DEBUG: Raw Arenas/Grounds Fetched:", data);
@@ -852,8 +871,10 @@ export default function WinDeclareApp() {
           id: item.id || item.ground_id || (Date.now() + index),
           title: item.name || item.title || 'Ground Arena',
           location: item.location || 'Hyderabad',
-          lat: item.lat || 17.4399,
-          lng: item.lng || 78.5082,
+          lat: Number(item.lat || item.latitude || 17.4399),
+          lng: Number(item.lng || item.longitude || 78.5082),
+          latitude: Number(item.lat || item.latitude || 17.4399),
+          longitude: Number(item.lng || item.longitude || 78.5082),
           price: Number(item.price_per_hour || item.price || 1000),
           price_per_hour: Number(item.price_per_hour || item.price || 1000),
           pricing_rules: item.pricing_rules || null,
@@ -950,7 +971,7 @@ export default function WinDeclareApp() {
 
   // Geolocation Request on Mount
   useEffect(() => {
-    if (navigator.geolocation) {
+    if (typeof window !== 'undefined' && 'geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           setUserLocation({
@@ -958,26 +979,51 @@ export default function WinDeclareApp() {
             lng: position.coords.longitude,
           });
         },
-        (error) => console.error("Error getting location:", error),
+        (error) => console.log('Geolocation permission denied or unavailable:', error),
         { enableHighAccuracy: true }
       );
     }
   }, []);
 
-  // Haversine Distance Calculation
-  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  // Haversine Distance Calculation (in km)
+  function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Earth radius in km
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos((lat1 * Math.PI) / 180) *
-        Math.cos((lat2 * Math.PI) / 180) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
+      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return (R * c).toFixed(1);
-  };
+    return Math.round(R * c * 10) / 10; // Round to 1 decimal place
+  }
+
+  // Memoize & Attach Calculated Distance to Grounds State
+  const groundsWithDistance = useMemo(() => {
+    return arenas.map((ground) => {
+      const groundLat = ground.lat ?? ground.latitude;
+      const groundLng = ground.lng ?? ground.longitude;
+      const hasCoords =
+        userLocation &&
+        groundLat !== undefined &&
+        groundLat !== null &&
+        !isNaN(Number(groundLat)) &&
+        groundLng !== undefined &&
+        groundLng !== null &&
+        !isNaN(Number(groundLng));
+
+      if (hasCoords) {
+        const dist = calculateDistanceKm(
+          userLocation.lat,
+          userLocation.lng,
+          Number(groundLat),
+          Number(groundLng)
+        );
+        return { ...ground, calculatedDistance: `${dist} km away` };
+      }
+      return { ...ground, calculatedDistance: null };
+    });
+  }, [arenas, userLocation]);
 
   const sportsList = ['Cricket', 'Basketball', 'Football', 'Tennis', 'Kabaddi', 'Badminton', 'Volleyball', 'Pickleball'];
   const amenitiesList = ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen', 'Bowling Machine'];
@@ -1114,21 +1160,13 @@ export default function WinDeclareApp() {
     }
     const fetchUserFavorites = async () => {
       try {
-        let { data, error } = await supabase
-          .from('favorite_arenas')
-          .select('arena_id')
+        const { data, error } = await supabase
+          .from('favorites')
+          .select('ground_id')
           .eq('user_id', currentUser.id);
 
-        if (error || !data || data.length === 0) {
-          const { data: favData } = await supabase
-            .from('favorites')
-            .select('arena_id')
-            .eq('user_id', currentUser.id);
-          if (favData) data = favData;
-        }
-
-        if (data && data.length > 0) {
-          const ids = data.map((item: any) => Number(item.arena_id)).filter(Boolean);
+        if (!error && data && data.length > 0) {
+          const ids = data.map((item: any) => Number(item.ground_id)).filter(Boolean);
           setFavoriteArenaIds(ids);
         } else {
           setFavoriteArenaIds([]);
@@ -1160,22 +1198,14 @@ export default function WinDeclareApp() {
     try {
       if (isFav) {
         await supabase
-          .from('favorite_arenas')
-          .delete()
-          .eq('user_id', currentUser.id)
-          .eq('arena_id', arenaId);
-        await supabase
           .from('favorites')
           .delete()
           .eq('user_id', currentUser.id)
-          .eq('arena_id', arenaId);
+          .eq('ground_id', arenaId);
       } else {
         await supabase
-          .from('favorite_arenas')
-          .insert([{ user_id: currentUser.id, arena_id: arenaId }]);
-        await supabase
           .from('favorites')
-          .insert([{ user_id: currentUser.id, arena_id: arenaId }]);
+          .insert([{ user_id: currentUser.id, ground_id: arenaId }]);
       }
     } catch (err) {
       console.warn("Supabase favorite toggle notice:", err);
@@ -1350,11 +1380,7 @@ export default function WinDeclareApp() {
         .eq('booking_date', targetDateStr)
         .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked');
 
-      if (isUuid) {
-        query = query.eq('ground_id', selectedArena.id);
-      } else {
-        query = query.or(`arena_id.eq.${Number(selectedArena.id)},ground_id.eq.${selectedArena.id}`);
-      }
+      query = query.eq('ground_id', selectedArena.id);
 
       const { data: activeBookings } = await query;
       if (activeBookings && activeBookings.length > 0) {
@@ -1473,13 +1499,12 @@ export default function WinDeclareApp() {
 
     // Save Booking Record directly to Supabase `bookings` table with status: 'confirmed'
     const recordsToInsert = slotsToInsert.map(s => ({
-      arena_id: selectedArena.id,
+      ground_id: selectedArena.id,
       user_id: currentUser?.id || '',
       slot_time: s.time,
       status: 'confirmed',
       booking_date: selectedDate,
       booking_id: newBooking.id,
-      ground_id: Number(selectedArena.id),
       arena_title: selectedArena.title,
       date: newBooking.date,
       date_index: selectedDateIndex,
@@ -1650,25 +1675,17 @@ export default function WinDeclareApp() {
         };
 
         let gErr: any = null;
-        let aErr: any = null;
 
         try {
-          const res1 = await supabase.from('grounds').insert([turfPayload]);
-          gErr = res1.error;
+          const res = await supabase.from('grounds').insert([turfPayload]);
+          gErr = res.error;
         } catch (e) {
           console.warn('Grounds table insert notice:', e);
         }
 
-        try {
-          const res2 = await supabase.from('arenas').insert([turfPayload]);
-          aErr = res2.error;
-        } catch (e) {
-          console.warn('Arenas table insert notice:', e);
-        }
-
-        if (gErr && aErr) {
-          console.error('Supabase turf save error message:', gErr.message || aErr.message);
-          alert('Failed to save turf: ' + (gErr.message || aErr.message || 'Database error'));
+        if (gErr) {
+          console.error('Supabase turf save error message:', gErr.message);
+          alert('Failed to save turf: ' + (gErr.message || 'Database error'));
           return;
         }
 
@@ -1693,10 +1710,8 @@ export default function WinDeclareApp() {
 
     try {
       const { error: err1 } = await supabase.from('grounds').delete().eq('id', turfId);
-      const { error: err2 } = await supabase.from('arenas').delete().eq('id', turfId);
-
-      if (err1 && err2) {
-        console.warn("Delete turf notice:", err1.message || err2.message);
+      if (err1) {
+        console.warn("Delete turf notice:", err1.message);
       }
 
       setArenas(prev => prev.filter(a => String(a.id) !== String(turfId)));
@@ -1821,7 +1836,7 @@ export default function WinDeclareApp() {
                 className="flex items-center gap-2 cursor-pointer group"
                 onClick={() => setView('browse')}
               >
-                <img src="/logo.png" alt="WinDeclare" className="w-9 h-9 object-contain group-hover:scale-105 transition duration-300" />
+                <img src="/favicon.png?v=3" alt="WinDeclare" className="w-9 h-9 object-contain group-hover:scale-105 transition duration-300" />
                 <div className="flex items-center gap-2">
                   <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-[#EC4899] transition">
                     WinDeclare
@@ -2031,13 +2046,9 @@ export default function WinDeclareApp() {
 
             {/* Arenas Grid */}
             <div className="grid md:grid-cols-3 gap-6">
-              {arenas
+              {groundsWithDistance
                 .filter(a => (a.is_verified !== false && a.status !== 'pending' && a.status !== 'rejected') && (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
                 .map((arena) => {
-                  const distance = userLocation 
-                    ? calculateDistance(userLocation.lat, userLocation.lng, arena.lat, arena.lng)
-                    : null;
-
                   const isFav = favoriteArenaIds.includes(Number(arena.id));
 
                   return (
@@ -2054,9 +2065,17 @@ export default function WinDeclareApp() {
                             <Heart className={`w-4 h-4 ${isFav ? 'fill-rose-500 text-rose-500' : 'text-white'}`} />
                           </button>
 
-                          {distance && (
+                          {arena.calculatedDistance ? (
                             <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-pink-500/40 text-[#EC4899] text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
-                              <Navigation className="w-3 h-3 fill-[#EC4899]" /> {distance} km away
+                              <Navigation className="w-3 h-3 fill-[#EC4899]" /> {arena.calculatedDistance}
+                            </div>
+                          ) : userLocation ? (
+                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-pink-500/20 text-pink-300 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                              <Loader2 className="w-3 h-3 animate-spin text-[#EC4899]" /> Calculating...
+                            </div>
+                          ) : (
+                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-gray-700/60 text-gray-300 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                              <MapPin className="w-3 h-3 text-[#EC4899]" /> {arena.location ? arena.location.split(',')[0] : 'Hyderabad'}
                             </div>
                           )}
 
@@ -2126,7 +2145,7 @@ export default function WinDeclareApp() {
                 <ArrowLeft className="w-4 h-4" /> Back
               </button>
               <div className="flex items-center gap-2">
-                <img src="/logo.png" alt="WinDeclare" className="w-7 h-7 object-contain" />
+                <img src="/favicon.png?v=3" alt="WinDeclare" className="w-7 h-7 object-contain" />
                 <span className="font-bold text-lg tracking-tight text-white">WinDeclare</span>
               </div>
             </div>
@@ -2941,11 +2960,7 @@ export default function WinDeclareApp() {
                                     .eq('booking_date', targetDateStr)
                                     .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked');
 
-                                  if (isUuid) {
-                                    query = query.eq('ground_id', activeOwnerTurf.id);
-                                  } else {
-                                    query = query.or(`arena_id.eq.${Number(activeOwnerTurf.id)},ground_id.eq.${activeOwnerTurf.id}`);
-                                  }
+                                  query = query.eq('ground_id', activeOwnerTurf.id);
 
                                   const { data: activeBookings } = await query;
                                   if (activeBookings && activeBookings.length > 0) {
@@ -3393,7 +3408,7 @@ export default function WinDeclareApp() {
                           </div>
                         ) : displayBookings.map((b: any, index: number) => {
                           const bId = b.booking_id || b.id || `WD-${index + 101}`;
-                          const arenaTitle = b.arenas?.title || b.grounds?.title || b.arena_title || b.arenaTitle || 'Turf Arena';
+                          const arenaTitle = b.grounds?.name || b.grounds?.title || b.arena_title || b.arenaTitle || 'Turf Arena';
                           const dateStr = b.date || b.booking_date || '';
                           const slotsStr = b.slot_time || b.slots || '';
                           const contactStr = b.user_contact || b.userContact || b.user_id || 'Player Contact';
@@ -3498,7 +3513,7 @@ export default function WinDeclareApp() {
                             const todayIso = new Date().toISOString().split('T')[0];
 
                             const isClosedOverride = slotOverrides.some(o => 
-                              (String(o.ground_id) === String(ownerGround.id) || String(o.arena_id) === String(ownerGround.id)) &&
+                              String(o.ground_id) === String(ownerGround.id) &&
                               o.slot_time === slot.time &&
                               (o.day_of_week === currentDow || o.specific_date === todayIso)
                             );
@@ -3655,7 +3670,7 @@ export default function WinDeclareApp() {
             );
           });
 
-          const playerFavoriteArenas = arenas.filter(a => favoriteArenaIds.includes(Number(a.id)));
+          const playerFavoriteArenas = groundsWithDistance.filter(a => favoriteArenaIds.includes(Number(a.id)));
 
           return (
             <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">

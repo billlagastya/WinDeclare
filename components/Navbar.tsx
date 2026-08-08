@@ -9,7 +9,7 @@ export default function Navbar() {
     <header className="border-b border-gray-800/80 bg-[#0d1117]/90 backdrop-blur sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2 group">
-          <img src="/logo.png" alt="WinDeclare" className="w-9 h-9 object-contain group-hover:scale-105 transition duration-300" />
+          <img src="/favicon.png?v=3" alt="WinDeclare" className="w-9 h-9 object-contain group-hover:scale-105 transition duration-300" />
           <span className="font-extrabold text-xl tracking-tight text-white group-hover:text-[#EC4899] transition">
             WinDeclare
           </span>

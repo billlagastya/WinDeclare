@@ -21,11 +21,7 @@ export async function POST(request: Request) {
         .eq('booking_date', booking_date)
         .in('status', ['confirmed', 'booked']);
 
-      if (isUuid) {
-        query = query.eq('ground_id', ground_id);
-      } else {
-        query = query.or(`arena_id.eq.${Number(ground_id)},ground_id.eq.${ground_id}`);
-      }
+      query = query.eq('ground_id', ground_id);
 
       const { data: existingBookings, error: checkErr } = await query;
       if (!checkErr && existingBookings && existingBookings.length > 0) {
@@ -52,25 +48,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // 1. Query ground/arena details safely from Supabase
+    // 1. Query ground details strictly from Supabase `grounds` table
     const gidStr = String(ground_id);
-    let { data: grounds, error: groundErr } = await supabase
+    let { data: grounds } = await supabase
       .from('grounds')
       .select('*')
-      .eq('id', gidStr);
-
-    if (groundErr || !grounds || grounds.length === 0) {
-      const isNumeric = /^\d+$/.test(gidStr);
-      if (isNumeric) {
-        const { data: arenasData } = await supabase
-          .from('arenas')
-          .select('*')
-          .eq('id', Number(gidStr));
-        if (arenasData && arenasData.length > 0) {
-          grounds = arenasData;
-        }
-      }
-    }
+      .or(`id.eq.${gidStr},ground_id.eq.${gidStr}`);
     const ground = grounds?.[0];
     const planType = ground?.plan_type || (ground?.plan === 'commission' ? 'commission' : (ground?.plan === 'hybrid' ? 'hybrid' : 'free'));
 

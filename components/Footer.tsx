@@ -14,7 +14,7 @@ export default function Footer({ onOpenAdmin }: FooterProps) {
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-sm text-center md:text-left">
         <div>
           <Link href="/" className="font-semibold text-white text-base flex items-center justify-center md:justify-start gap-2 hover:text-[#EC4899] transition">
-            <img src="/logo.png" alt="WinDeclare" className="w-7 h-7 object-contain" />
+            <img src="/favicon.png?v=3" alt="WinDeclare" className="w-7 h-7 object-contain" />
             WinDeclare
           </Link>
           <p className="text-xs text-gray-400 mt-2">
