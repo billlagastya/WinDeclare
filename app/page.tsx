@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  Trophy, User, MapPin, Navigation, ArrowLeft,
+  TrendingUp, User, MapPin, Navigation, ArrowLeft,
   Calendar, CheckCircle2, Phone, ShieldCheck,
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
   LogOut, Mail, Check, Star, Clock, Compass,
@@ -13,6 +13,7 @@ import {
 import { supabase } from '@/lib/supabaseClient';
 import { initiateOnlinePayment } from '@/lib/payment';
 import Footer from '@/components/Footer';
+import EarningsView from '@/components/EarningsView';
 
 interface Arena {
   id: number | string;
@@ -145,7 +146,7 @@ const extractSlotTimesFromBooking = (row: any): string[] => {
 
 export default function WinDeclareApp() {
   const [view, setView] = useState<'browse' | 'arena-details' | 'profile' | 'owner-portal' | 'admin-dashboard'>('browse');
-  const [ownerTab, setOwnerTab] = useState<'calendar' | 'listings' | 'bookings' | 'pricing' | 'account'>('calendar');
+  const [ownerTab, setOwnerTab] = useState<'calendar' | 'listings' | 'earnings' | 'bookings' | 'pricing' | 'account'>('calendar');
   const [isOwnerDrawerOpen, setIsOwnerDrawerOpen] = useState<boolean>(false);
   const [selectedOwnerTurfId, setSelectedOwnerTurfId] = useState<string | number | null>(null);
   const [profileTab, setProfileTab] = useState<'bookings' | 'favorites' | 'account'>('bookings');
@@ -1115,11 +1116,10 @@ export default function WinDeclareApp() {
   // SUPABASE AUTH GOOGLE SIGN-IN ONLY
   const handleGoogleSignIn = async () => {
     try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${origin}/auth/callback`
+          redirectTo: `${window.location.origin}/auth/callback`
         }
       });
       if (error) throw error;
@@ -2731,130 +2731,20 @@ export default function WinDeclareApp() {
         {view === 'owner-portal' && (() => {
           const ownerArenaIds = ownerTurfs.map(t => Number(t.id));
           const ownerBookings = myBookings.filter(b => ownerArenaIds.includes(Number(b.arenaId)));
-          const displayBookings = ownerPortalBookings.length > 0 ? ownerPortalBookings : ownerBookings;
-
-          const currentPlanType = activeOwnerTurf?.plan_type || (activeOwnerTurf?.plan === 'commission' ? 'commission' : (activeOwnerTurf?.plan === 'hybrid' ? 'hybrid' : 'free'));
-          const isFreePlan = currentPlanType === 'free';
-          const commissionRate = currentPlanType === 'hybrid' ? 0.03 : (currentPlanType === 'commission' ? 0.10 : 0);
-
-          const grossRevenue = displayBookings.reduce((sum, b) => sum + Number(b.total_amount || b.amount || 0), 0);
-          const platformCommission = grossRevenue * commissionRate;
-          const netEarnings = grossRevenue - platformCommission;
-
-          const todayStr = new Date().toISOString().split('T')[0];
-          const todayGross = displayBookings
-            .filter(b => (b.booking_date || b.created_at || '').startsWith(todayStr))
-            .reduce((sum, b) => sum + Number(b.total_amount || b.amount || 0), 0);
-          const todayNet = todayGross * (1 - commissionRate);
-
-          const weeklyGross = grossRevenue * 0.45;
-          const weeklyNet = weeklyGross * (1 - commissionRate);
-
-          const monthlyGross = grossRevenue;
-          const monthlyNet = netEarnings;
 
           return (
             <div className="min-h-[calc(100vh-64px)] bg-[#070b12] text-gray-100 p-4 sm:p-8">
               <main className="max-w-6xl mx-auto space-y-6">
-
-                {/* PLAN-BASED REVENUE ANALYTICS & EARNINGS BAR CHART HEADER (Requirement 2) */}
-                {isFreePlan ? (
-                  <div className="bg-[#0e1320] border border-pink-500/30 rounded-3xl p-6 shadow-2xl space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-pink-500/10 border border-pink-500/30 flex items-center justify-center text-[#EC4899]">
-                        <Lock className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded border bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
-                            Free Plan Active
-                          </span>
-                          <span className="text-xs font-bold text-gray-400 font-mono">0% Commission • ₹0/mo</span>
-                        </div>
-                        <h3 className="text-xl font-extrabold text-white mt-1">Revenue Analytics & Automatic Payouts Locked</h3>
-                      </div>
-                    </div>
-
-                    <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-2 text-xs text-gray-300">
-                      <p className="font-semibold text-[#EC4899] flex items-center gap-1.5">
-                        <Shield className="w-4 h-4 text-[#EC4899]" />
-                        Upgrade to Hybrid (3% + ₹2k) or Commission (10%) plan to unlock detailed revenue analytics, automatic payouts, and performance charts.
-                      </p>
-                      <p className="text-gray-400 text-[11px]">
-                        Under the Free Plan, players contact you directly on WhatsApp for direct cash/UPI payment. Upgrade your plan anytime to enable automated platform payments, instant earnings tracking, and detailed revenue analytics.
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-[#0e1320] border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                      <div>
-                        <span className="text-[10px] font-bold text-teal-400 uppercase tracking-widest bg-teal-500/10 px-2.5 py-0.5 rounded border border-teal-500/20">
-                          {currentPlanType === 'hybrid' ? 'Hybrid Plan (3% Comm + ₹2,000/mo)' : 'Commission Plan (10% Comm)'}
-                        </span>
-                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white mt-1">Net Revenue Analytics & Earnings</h2>
-                        <p className="text-xs text-gray-400 mt-0.5">Calculated net earnings after platform commission deduction</p>
-                      </div>
-                    </div>
-
-                    {/* Revenue Metrics Cards */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Total Net Earnings</span>
-                        <span className="text-2xl font-black text-emerald-400 font-mono block">₹{Math.round(netEarnings)}</span>
-                        <span className="text-[10px] text-gray-500 block">Gross: ₹{Math.round(grossRevenue)}</span>
-                      </div>
-
-                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Daily Net Revenue</span>
-                        <span className="text-2xl font-black text-[#EC4899] font-mono block">₹{Math.round(todayNet)}</span>
-                        <span className="text-[10px] text-gray-500 block">Today's collection</span>
-                      </div>
-
-                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Weekly Net Revenue</span>
-                        <span className="text-2xl font-black text-teal-400 font-mono block">₹{Math.round(weeklyNet)}</span>
-                        <span className="text-[10px] text-gray-500 block">7-day trailing net</span>
-                      </div>
-
-                      <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 space-y-1">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Monthly Net Revenue</span>
-                        <span className="text-2xl font-black text-purple-400 font-mono block">₹{Math.round(monthlyNet)}</span>
-                        <span className="text-[10px] text-gray-500 block">Current month total</span>
-                      </div>
-                    </div>
-
-                    {/* Earnings Bar Chart Component */}
-                    <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-5 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-gray-300 uppercase tracking-wider flex items-center gap-2">
-                          <Trophy className="w-4 h-4 text-[#EC4899]" /> Net Revenue Performance Chart (Weekly)
-                        </h4>
-                        <span className="text-[10px] font-mono text-gray-400">Net Rate: {100 - (commissionRate * 100)}%</span>
-                      </div>
-
-                      {/* Interactive Bar Chart Visualization */}
-                      <div className="h-40 flex items-end justify-between gap-3 pt-6 pb-2 px-4 border-b border-gray-800">
-                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, idx) => {
-                          const barHeights = [45, 60, 30, 80, 95, 70, 85];
-                          const heightPct = barHeights[idx];
-                          return (
-                            <div key={day} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                              <div className="w-full max-w-[36px] bg-gray-900 rounded-t-lg relative overflow-hidden flex items-end transition-all h-full">
-                                <div 
-                                  style={{ height: `${heightPct}%` }} 
-                                  className="w-full bg-gradient-to-t from-teal-600 to-emerald-400 rounded-t-lg transition-all duration-500 group-hover:brightness-125"
-                                />
-                              </div>
-                              <span className="text-[10px] font-mono text-gray-400 uppercase">{day}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
                 
+                {/* TAB: EARNINGS & REVENUE ANALYTICS */}
+                {ownerTab === 'earnings' && (
+                  <EarningsView 
+                    currentUser={currentUser} 
+                    ownerTurfs={ownerTurfs} 
+                    activeOwnerTurf={activeOwnerTurf} 
+                  />
+                )}
+
                 {/* TAB 0: DEFAULT DAILY CALENDAR & OFFLINE DIRECT BOOKINGS */}
                 {ownerTab === 'calendar' && (
                   <div className="space-y-6">
@@ -4173,6 +4063,15 @@ export default function WinDeclareApp() {
                   }`}
                 >
                   <LayoutDashboard className="w-4 h-4 text-[#EC4899]" /> Listings Manager
+                </button>
+
+                <button
+                  onClick={() => { setOwnerTab('earnings'); setIsOwnerDrawerOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-bold transition ${
+                    ownerTab === 'earnings' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black shadow-lg shadow-pink-500/20' : 'text-gray-300 hover:bg-gray-900 hover:text-white'
+                  }`}
+                >
+                  <TrendingUp className="w-4 h-4 text-[#EC4899]" /> Earnings & Revenue
                 </button>
 
                 <button
