@@ -7,7 +7,8 @@ import {
   Building2, Plus, LayoutDashboard, ScanLine, IndianRupee,
   LogOut, Mail, Check, Star, Clock, Compass,
   CreditCard, Smartphone, CheckCircle, X, Loader2, Search,
-  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound, Filter, Menu, Trash2, Power
+  Heart, Shield, Users, ChevronDown, Settings, Lock, Wallet, KeyRound, Filter, Menu, Trash2, Power,
+  Edit, Camera, UploadCloud, ImageIcon
 } from 'lucide-react';
 
 import { supabase } from '@/lib/supabaseClient';
@@ -33,6 +34,7 @@ interface Arena {
   amenities: string[];
   sports: string[];
   image: string;
+  images?: string[];
   locationUrl?: string;
   plan?: 'subscription' | 'commission' | 'hybrid' | string;
   plan_type?: 'free' | 'hybrid' | 'commission';
@@ -272,6 +274,10 @@ export default function WinDeclareApp() {
   const [slotPrices, setSlotPrices] = useState<Record<string, Record<string, number>>>({});
   const [editingBasePrice, setEditingBasePrice] = useState<number | null>(null);
 
+  // Options for Sports and Facilities chips
+  const AVAILABLE_SPORTS = ['Football', 'Cricket', 'Basketball', 'Tennis', 'Badminton', 'Volleyball'];
+  const AVAILABLE_FACILITIES = ['Toilet', 'Parking', 'Drinking Water', 'Cafe', 'Floodlights', 'Changing Rooms'];
+
   // Form selections for new venue
   const [newArenaName, setNewArenaName] = useState<string>('');
   const [newArenaLocation, setNewArenaLocation] = useState<string>('');
@@ -284,9 +290,26 @@ export default function WinDeclareApp() {
   const [newArenaUpiId, setNewArenaUpiId] = useState<string>('');
   const [newArenaWhatsappNumber, setNewArenaWhatsappNumber] = useState<string>('');
   const [selectedSports, setSelectedSports] = useState<string[]>(['Cricket', 'Football']);
-  const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['Changing Rooms', 'Washrooms', 'Parking']);
+  const [selectedAmenities, setSelectedAmenities] = useState<string[]>(['Changing Rooms', 'Toilet', 'Parking']);
   const [gstEligible, setGstEligible] = useState<boolean>(true);
   const [isUploadingQr, setIsUploadingQr] = useState<boolean>(false);
+
+  // Ground Multi-Image Upload State
+  const [newArenaImages, setNewArenaImages] = useState<string[]>([]);
+  const [isUploadingGroundImages, setIsUploadingGroundImages] = useState<boolean>(false);
+
+  // Edit Ground Modal State
+  const [showEditTurfModal, setShowEditTurfModal] = useState<boolean>(false);
+  const [editingTurf, setEditingTurf] = useState<Arena | null>(null);
+  const [editingTurfTitle, setEditingTurfTitle] = useState<string>('');
+  const [editingTurfLocation, setEditingTurfLocation] = useState<string>('');
+  const [editingTurfPrice, setEditingTurfPrice] = useState<number>(1200);
+  const [editingTurfLocationUrl, setEditingTurfLocationUrl] = useState<string>('');
+  const [editingTurfWhatsappNumber, setEditingTurfWhatsappNumber] = useState<string>('');
+  const [editingTurfUpiId, setEditingTurfUpiId] = useState<string>('');
+  const [editingTurfSports, setEditingTurfSports] = useState<string[]>([]);
+  const [editingTurfAmenities, setEditingTurfAmenities] = useState<string[]>([]);
+  const [editingTurfImages, setEditingTurfImages] = useState<string[]>([]);
 
   // Automatically sync Contact Email input with logged-in user email
   useEffect(() => {
@@ -844,7 +867,8 @@ export default function WinDeclareApp() {
           reviews: item.reviews || 1,
           amenities: item.facilities || item.amenities || ['Changing Rooms', 'Washrooms', 'Parking'],
           sports: item.sports || ['Cricket', 'Football'],
-          image: item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
+          images: Array.isArray(item.images) ? item.images : (item.images ? (typeof item.images === 'string' ? JSON.parse(item.images) : [item.images]) : []),
+          image: (Array.isArray(item.images) && item.images.length > 0 && item.images[0]) ? item.images[0] : (item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'),
           locationUrl: item.location_url || item.locationUrl || '',
           plan: item.plan || 'subscription',
           ownerEmail: item.owner_email || item.ownerEmail || 'owner@turf.in',
@@ -883,7 +907,8 @@ export default function WinDeclareApp() {
           reviews: item.reviews || 1,
           amenities: item.facilities || item.amenities || ['Changing Rooms', 'Washrooms', 'Parking'],
           sports: item.sports || ['Cricket', 'Football'],
-          image: item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
+          images: Array.isArray(item.images) ? item.images : (item.images ? (typeof item.images === 'string' ? JSON.parse(item.images) : [item.images]) : []),
+          image: (Array.isArray(item.images) && item.images.length > 0 && item.images[0]) ? item.images[0] : (item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'),
           locationUrl: item.location_url || item.locationUrl || '',
           plan: item.plan || 'subscription',
           plan_type: item.plan_type || (item.plan === 'commission' ? 'commission' : (item.plan === 'hybrid' ? 'hybrid' : 'free')),
@@ -1553,10 +1578,147 @@ export default function WinDeclareApp() {
   };
 
   const toggleAmenity = (amenity: string) => {
+    const isToilet = amenity === 'Toilet' || amenity === 'Washrooms';
+    if (isToilet) {
+      if (selectedAmenities.some(a => a === 'Toilet' || a === 'Washrooms')) {
+        setSelectedAmenities(selectedAmenities.filter(a => a !== 'Toilet' && a !== 'Washrooms'));
+      } else {
+        setSelectedAmenities([...selectedAmenities, 'Toilet']);
+      }
+      return;
+    }
     if (selectedAmenities.includes(amenity)) {
       setSelectedAmenities(selectedAmenities.filter(a => a !== amenity));
     } else {
       setSelectedAmenities([...selectedAmenities, amenity]);
+    }
+  };
+
+  // Handler for uploading multiple ground images to Supabase storage 'ground-images' bucket
+  const handleGroundImagesUpload = async (e: React.ChangeEvent<HTMLInputElement>, isEditMode: boolean = false) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingGroundImages(true);
+    const newUrls: string[] = [];
+
+    try {
+      const folder = isEditMode && editingTurf ? String(editingTurf.id) : `temp_${Date.now()}`;
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileExt = file.name.split('.').pop() || 'jpg';
+        const cleanName = file.name.replace(/[^a-zA-Z0-9]/g, '_');
+        const filePath = `public/${folder}/${Date.now()}_${i}_${cleanName}`;
+
+        const { data, error } = await supabase.storage
+          .from('ground-images')
+          .upload(filePath, file, { upsert: true, cacheControl: '3600' });
+
+        if (error) {
+          console.error("Supabase ground-images upload error:", error);
+          const fallbackPath = `${folder}_${Date.now()}_${i}.${fileExt}`;
+          const { data: fbData, error: fbErr } = await supabase.storage
+            .from('ground-images')
+            .upload(fallbackPath, file, { upsert: true });
+
+          if (!fbErr && fbData) {
+            const { data: pubData } = supabase.storage.from('ground-images').getPublicUrl(fbData.path);
+            if (pubData?.publicUrl) newUrls.push(pubData.publicUrl);
+          }
+        } else if (data) {
+          const { data: pubData } = supabase.storage.from('ground-images').getPublicUrl(data.path);
+          if (pubData?.publicUrl) {
+            newUrls.push(pubData.publicUrl);
+          }
+        }
+      }
+
+      if (newUrls.length > 0) {
+        if (isEditMode) {
+          setEditingTurfImages(prev => [...prev, ...newUrls]);
+        } else {
+          setNewArenaImages(prev => [...prev, ...newUrls]);
+        }
+        showToast(`✓ Uploaded ${newUrls.length} photo(s)!`);
+      }
+    } catch (err: any) {
+      console.error("Ground images upload exception:", err);
+      showToast(`❌ Image upload failed: ${err.message || 'Error uploading'}`);
+    } finally {
+      setIsUploadingGroundImages(false);
+    }
+  };
+
+  const removeNewArenaImage = (idxToRemove: number) => {
+    setNewArenaImages(prev => prev.filter((_, i) => i !== idxToRemove));
+  };
+
+  const removeEditingTurfImage = (idxToRemove: number) => {
+    setEditingTurfImages(prev => prev.filter((_, i) => i !== idxToRemove));
+  };
+
+  const handleOpenEditTurfModal = (arena: Arena) => {
+    setEditingTurf(arena);
+    setEditingTurfTitle(arena.title || '');
+    setEditingTurfLocation(arena.location || '');
+    setEditingTurfPrice(arena.price || 1200);
+    setEditingTurfLocationUrl(arena.locationUrl || '');
+    setEditingTurfWhatsappNumber(arena.whatsappNumber || '');
+    setEditingTurfUpiId(arena.ownerUpiId || arena.upiId || '');
+    setEditingTurfSports(arena.sports || []);
+    setEditingTurfAmenities(arena.amenities || []);
+    setEditingTurfImages(arena.images && arena.images.length > 0 ? arena.images : (arena.image ? [arena.image] : []));
+    setShowEditTurfModal(true);
+  };
+
+  const handleUpdateVenue = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTurf) return;
+
+    if (!editingTurfTitle || !editingTurfLocation) {
+      alert('Please fill out Arena Name and Location!');
+      return;
+    }
+
+    if (editingTurfSports.length === 0) {
+      alert('Please select at least one supported sport!');
+      return;
+    }
+
+    try {
+      const primaryImg = editingTurfImages.length > 0 
+        ? editingTurfImages[0] 
+        : (editingTurf.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop');
+
+      const updatePayload = {
+        name: editingTurfTitle,
+        location: editingTurfLocation,
+        price_per_hour: Number(editingTurfPrice),
+        location_url: editingTurfLocationUrl,
+        sports: editingTurfSports,
+        facilities: editingTurfAmenities,
+        images: editingTurfImages,
+        whatsapp_number: editingTurfWhatsappNumber,
+        upi_id: editingTurfUpiId
+      };
+
+      const { error } = await supabase
+        .from('grounds')
+        .update(updatePayload)
+        .eq('id', editingTurf.id);
+
+      if (error) {
+        console.error('Failed to update ground in Supabase:', error);
+        showToast(`❌ Failed to update ground: ${error.message}`);
+        return;
+      }
+
+      showToast('✓ Ground updated successfully!');
+      setShowEditTurfModal(false);
+      await fetchGroundsFromSupabase();
+    } catch (err: any) {
+      console.error('Error updating ground:', err);
+      showToast(`❌ Error updating ground: ${err.message || 'Unknown error'}`);
     }
   };
 
@@ -1598,6 +1760,11 @@ export default function WinDeclareApp() {
 
     if (!newArenaName || !newArenaLocation) {
       alert('Please fill out Arena Name and Location!');
+      return;
+    }
+
+    if (selectedSports.length === 0) {
+      alert('Please select at least one supported sport!');
       return;
     }
 
@@ -1666,6 +1833,7 @@ export default function WinDeclareApp() {
           whatsapp_number: whatsappVal,
           sports: Array.isArray(newTurf.sports) ? newTurf.sports : [],
           facilities: Array.isArray(newTurf.facilities) ? newTurf.facilities : [],
+          images: newArenaImages,
           status: 'pending',
           user_id: currentOwnerId,
           owner_id: currentOwnerId,
@@ -2050,12 +2218,21 @@ export default function WinDeclareApp() {
                 .filter(a => (a.is_verified !== false && a.status !== 'pending' && a.status !== 'rejected') && (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
                 .map((arena) => {
                   const isFav = favoriteArenaIds.includes(Number(arena.id));
+                  const cardImage = (arena.images && arena.images.length > 0 && arena.images[0])
+                    ? arena.images[0]
+                    : (arena.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop');
 
                   return (
                     <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-pink-500/40 transition flex flex-col justify-between shadow-xl group">
                       <div>
                         <div className="relative h-48 bg-gray-950 overflow-hidden">
-                          <img src={arena.image} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                          <img src={cardImage} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                          
+                          {arena.images && arena.images.length > 1 && (
+                            <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-white px-2 py-0.5 rounded-md flex items-center gap-1 border border-white/10 z-10">
+                              <Camera className="w-3 h-3 text-[#EC4899]" /> {arena.images.length} Photos
+                            </div>
+                          )}
                           
                           {/* Favorite Button */}
                           <button 
@@ -3174,6 +3351,120 @@ export default function WinDeclareApp() {
                                 />
                               </div>
 
+                              {/* SUPPORTED SPORTS CHIPS */}
+                              <div className="space-y-2">
+                                <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
+                                  Supported Sports * <span className="text-gray-500 font-normal lowercase">(Select all that apply)</span>
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                  {AVAILABLE_SPORTS.map((sport) => {
+                                    const isSelected = selectedSports.includes(sport);
+                                    return (
+                                      <button
+                                        key={sport}
+                                        type="button"
+                                        onClick={() => toggleSport(sport)}
+                                        className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                                          isSelected
+                                            ? 'bg-[#EC4899]/15 border-[#EC4899] text-[#EC4899] font-bold shadow-md shadow-pink-500/10'
+                                            : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-300'
+                                        }`}
+                                      >
+                                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                                        {sport}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* FACILITIES & AMENITIES CHIPS */}
+                              <div className="space-y-2">
+                                <label className="block text-[11px] font-bold text-[#0EA5E9] uppercase">
+                                  Facilities & Amenities <span className="text-gray-500 font-normal lowercase">(Select available amenities)</span>
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                  {AVAILABLE_FACILITIES.map((facility) => {
+                                    const isSelected = facility === 'Toilet'
+                                      ? selectedAmenities.some(a => a === 'Toilet' || a === 'Washrooms')
+                                      : selectedAmenities.includes(facility);
+                                    return (
+                                      <button
+                                        key={facility}
+                                        type="button"
+                                        onClick={() => toggleAmenity(facility)}
+                                        className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                                          isSelected
+                                            ? 'bg-[#0EA5E9]/15 border-[#0EA5E9] text-[#0EA5E9] font-bold shadow-md shadow-sky-500/10'
+                                            : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-300'
+                                        }`}
+                                      >
+                                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                                        {facility}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* MULTIPLE GROUND IMAGES UPLOADER */}
+                              <div className="space-y-2">
+                                <label className="block text-[11px] font-bold text-[#0EA5E9] uppercase flex items-center justify-between">
+                                  <span>Ground Photos / Gallery (`images text[]`)</span>
+                                  <span className="text-gray-500 font-normal lowercase">(Multiple upload supported)</span>
+                                </label>
+                                
+                                <div className="border-2 border-dashed border-gray-800 hover:border-[#0EA5E9]/50 rounded-2xl p-4 text-center bg-[#080c14] transition cursor-pointer relative">
+                                  <input 
+                                    type="file" 
+                                    multiple 
+                                    accept="image/*" 
+                                    onChange={(e) => handleGroundImagesUpload(e, false)}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                                  />
+                                  <div className="flex flex-col items-center justify-center space-y-1.5 pointer-events-none">
+                                    <UploadCloud className="w-6 h-6 text-[#0EA5E9]" />
+                                    <p className="text-xs text-gray-300 font-bold">
+                                      Drag & drop photos here, or <span className="text-[#0EA5E9] underline">browse files</span>
+                                    </p>
+                                    <p className="text-[10px] text-gray-500">Supports PNG, JPG, WEBP • Stored in Supabase `ground-images`</p>
+                                  </div>
+                                </div>
+
+                                {isUploadingGroundImages && (
+                                  <p className="text-[10px] text-[#0EA5E9] font-semibold animate-pulse flex items-center gap-1.5">
+                                    <Loader2 className="w-3 h-3 animate-spin" /> Uploading photo(s) to Supabase Storage 'ground-images'...
+                                  </p>
+                                )}
+
+                                {/* Photo Thumbnails Preview Grid */}
+                                {newArenaImages.length > 0 && (
+                                  <div className="space-y-1.5 pt-1">
+                                    <p className="text-[10px] font-extrabold text-gray-400 uppercase">Uploaded Ground Photos ({newArenaImages.length}):</p>
+                                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                                      {newArenaImages.map((imgUrl, idx) => (
+                                        <div key={`${imgUrl}-${idx}`} className="relative group rounded-xl overflow-hidden border border-gray-800 bg-gray-950 aspect-square">
+                                          <img src={imgUrl} alt={`Ground Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                                          <button
+                                            type="button"
+                                            onClick={() => removeNewArenaImage(idx)}
+                                            className="absolute top-1 right-1 bg-rose-600/90 hover:bg-rose-600 text-white p-1 rounded-full shadow-lg transition opacity-90 group-hover:opacity-100 z-20"
+                                            title="Remove photo"
+                                          >
+                                            <X className="w-3 h-3 stroke-[3]" />
+                                          </button>
+                                          {idx === 0 && (
+                                            <span className="absolute bottom-1 left-1 bg-emerald-500/90 text-black font-black text-[8px] px-1 py-0.2 rounded">
+                                              Cover
+                                            </span>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
                               {/* QR Code Image Direct File Upload */}
                               <div className="space-y-2">
                                 <label className="block text-[11px] font-bold text-purple-400 uppercase">Upload Owner Payment QR Code Image (`file` upload)</label>
@@ -3237,6 +3528,13 @@ export default function WinDeclareApp() {
                                   </div>
 
                                   <div className="flex items-center gap-2 self-start sm:self-auto">
+                                    <button 
+                                      type="button"
+                                      onClick={() => handleOpenEditTurfModal(arena)}
+                                      className="text-xs font-bold bg-pink-500/10 hover:bg-pink-500/20 text-[#EC4899] border border-pink-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" /> Edit Ground
+                                    </button>
                                     <button 
                                       onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
                                       className="text-xs font-bold bg-gray-900 hover:bg-gray-800 text-teal-400 border border-teal-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1"
@@ -4151,6 +4449,249 @@ export default function WinDeclareApp() {
                 Pay via Paytm / UPI
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT GROUND ARENA MODAL */}
+      {showEditTurfModal && editingTurf && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-[#0e1320] border border-pink-500/30 w-full max-w-2xl rounded-3xl p-6 shadow-2xl relative space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+              <h3 className="font-bold text-[#EC4899] text-base flex items-center gap-2">
+                <Edit className="w-5 h-5" /> Edit Ground Arena Details
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => setShowEditTurfModal(false)} 
+                className="text-gray-400 hover:text-white p-1 bg-gray-900 rounded-xl"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateVenue} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Arena Name *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={editingTurfTitle}
+                    onChange={(e) => setEditingTurfTitle(e.target.value)}
+                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Location Address *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={editingTurfLocation}
+                    onChange={(e) => setEditingTurfLocation(e.target.value)}
+                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Price Per Hour (₹) *</label>
+                  <input 
+                    type="number" 
+                    required 
+                    value={editingTurfPrice}
+                    onChange={(e) => setEditingTurfPrice(Number(e.target.value))}
+                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono" 
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">WhatsApp Number</label>
+                  <input 
+                    type="tel" 
+                    value={editingTurfWhatsappNumber}
+                    onChange={(e) => setEditingTurfWhatsappNumber(e.target.value)}
+                    placeholder="+91 9876543210"
+                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono" 
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Owner UPI ID</label>
+                  <input 
+                    type="text" 
+                    value={editingTurfUpiId}
+                    onChange={(e) => setEditingTurfUpiId(e.target.value)}
+                    placeholder="owner@okaxis"
+                    className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono" 
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-teal-400 uppercase mb-1">Google Maps Location URL</label>
+                <input 
+                  type="url" 
+                  value={editingTurfLocationUrl}
+                  onChange={(e) => setEditingTurfLocationUrl(e.target.value)}
+                  placeholder="https://maps.google.com/?q=..." 
+                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-teal-500 font-mono" 
+                />
+              </div>
+
+              {/* SPORTS SELECTION CHIPS */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
+                  Supported Sports * <span className="text-gray-500 font-normal lowercase">(Select all that apply)</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_SPORTS.map((sport) => {
+                    const isSelected = editingTurfSports.includes(sport);
+                    return (
+                      <button
+                        key={sport}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            setEditingTurfSports(editingTurfSports.filter(s => s !== sport));
+                          } else {
+                            setEditingTurfSports([...editingTurfSports, sport]);
+                          }
+                        }}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                          isSelected
+                            ? 'bg-[#EC4899]/15 border-[#EC4899] text-[#EC4899] font-bold shadow-md shadow-pink-500/10'
+                            : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-300'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                        {sport}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* FACILITIES CHIPS */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-[#0EA5E9] uppercase">
+                  Facilities & Amenities <span className="text-gray-500 font-normal lowercase">(Select available amenities)</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_FACILITIES.map((facility) => {
+                    const isSelected = facility === 'Toilet'
+                      ? editingTurfAmenities.some(a => a === 'Toilet' || a === 'Washrooms')
+                      : editingTurfAmenities.includes(facility);
+                    return (
+                      <button
+                        key={facility}
+                        type="button"
+                        onClick={() => {
+                          const isToilet = facility === 'Toilet' || facility === 'Washrooms';
+                          if (isToilet) {
+                            if (editingTurfAmenities.some(a => a === 'Toilet' || a === 'Washrooms')) {
+                              setEditingTurfAmenities(editingTurfAmenities.filter(a => a !== 'Toilet' && a !== 'Washrooms'));
+                            } else {
+                              setEditingTurfAmenities([...editingTurfAmenities, 'Toilet']);
+                            }
+                          } else {
+                            if (editingTurfAmenities.includes(facility)) {
+                              setEditingTurfAmenities(editingTurfAmenities.filter(a => a !== facility));
+                            } else {
+                              setEditingTurfAmenities([...editingTurfAmenities, facility]);
+                            }
+                          }
+                        }}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                          isSelected
+                            ? 'bg-[#0EA5E9]/15 border-[#0EA5E9] text-[#0EA5E9] font-bold shadow-md shadow-sky-500/10'
+                            : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700 hover:text-gray-300'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                        {facility}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* GROUND IMAGES UPLOADER FOR EDIT MODAL */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-[#0EA5E9] uppercase flex items-center justify-between">
+                  <span>Ground Photos / Gallery (`images text[]`)</span>
+                  <span className="text-gray-500 font-normal lowercase">(Upload or add ground photos)</span>
+                </label>
+                
+                <div className="border-2 border-dashed border-gray-800 hover:border-[#0EA5E9]/50 rounded-2xl p-4 text-center bg-[#080c14] transition cursor-pointer relative">
+                  <input 
+                    type="file" 
+                    multiple 
+                    accept="image/*" 
+                    onChange={(e) => handleGroundImagesUpload(e, true)}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  />
+                  <div className="flex flex-col items-center justify-center space-y-1.5 pointer-events-none">
+                    <UploadCloud className="w-6 h-6 text-[#0EA5E9]" />
+                    <p className="text-xs text-gray-300 font-bold">
+                      Drag & drop photos here, or <span className="text-[#0EA5E9] underline">browse files</span>
+                    </p>
+                    <p className="text-[10px] text-gray-500">Stored in Supabase bucket `ground-images`</p>
+                  </div>
+                </div>
+
+                {isUploadingGroundImages && (
+                  <p className="text-[10px] text-[#0EA5E9] font-semibold animate-pulse flex items-center gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Uploading photo(s)...
+                  </p>
+                )}
+
+                {/* Edit Photo Thumbnails Grid */}
+                {editingTurfImages.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <p className="text-[10px] font-extrabold text-gray-400 uppercase">Current Ground Photos ({editingTurfImages.length}):</p>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {editingTurfImages.map((imgUrl, idx) => (
+                        <div key={`${imgUrl}-${idx}`} className="relative group rounded-xl overflow-hidden border border-gray-800 bg-gray-950 aspect-square">
+                          <img src={imgUrl} alt={`Ground Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => removeEditingTurfImage(idx)}
+                            className="absolute top-1 right-1 bg-rose-600/90 hover:bg-rose-600 text-white p-1 rounded-full shadow-lg transition opacity-90 group-hover:opacity-100 z-20"
+                            title="Remove photo"
+                          >
+                            <X className="w-3 h-3 stroke-[3]" />
+                          </button>
+                          {idx === 0 && (
+                            <span className="absolute bottom-1 left-1 bg-emerald-500/90 text-black font-black text-[8px] px-1 py-0.2 rounded">
+                              Cover
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button 
+                  type="button"
+                  onClick={() => setShowEditTurfModal(false)}
+                  className="flex-1 bg-gray-900 hover:bg-gray-800 text-gray-300 font-extrabold py-3.5 rounded-xl transition text-xs border border-gray-800"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold py-3.5 rounded-xl transition text-xs shadow-lg flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4 stroke-[3]" /> Save Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
