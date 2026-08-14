@@ -18,7 +18,7 @@ export default function Footer({ onOpenAdmin }: FooterProps) {
             WinDeclare
           </Link>
           <p className="text-xs text-gray-400 mt-2">
-            Operated by: <span className="text-gray-200 font-medium">KONDRA SHRAVAN KUMAR</span> (Sole Proprietorship)
+            Operated by: <span className="text-gray-200 font-medium">ArivuZ</span> (Sole Proprietorship)
           </p>
         </div>
 
@@ -40,7 +40,7 @@ export default function Footer({ onOpenAdmin }: FooterProps) {
           </div>
           <p>© {new Date().getFullYear()} WinDeclare. All rights reserved.</p>
           <p className="text-gray-500">
-            Legal Entity Name: <span className="text-gray-400">KONDRA SHRAVAN KUMAR</span>
+            Legal Entity Name: <span className="text-gray-400">ArivuZ</span>
           </p>
         </div>
       </div>

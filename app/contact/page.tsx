@@ -6,7 +6,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Contact Us | WinDeclare',
-  description: 'Contact WinDeclare support and management operated by KONDRA SHRAVAN KUMAR (Sole Proprietorship).'
+  description: 'Contact WinDeclare support and management operated by ArivuZ (Sole Proprietorship).'
 };
 
 export default function ContactPage() {
@@ -36,7 +36,7 @@ export default function ContactPage() {
               <div className="space-y-2 text-sm text-gray-300">
                 <p>
                   <span className="text-gray-400">Legal Entity Name:</span>{' '}
-                  <strong className="text-white">KONDRA SHRAVAN KUMAR</strong>
+                  <strong className="text-white">ArivuZ</strong>
                 </p>
                 <p>
                   <span className="text-gray-400">Business Structure:</span>{' '}
@@ -65,10 +65,10 @@ export default function ContactPage() {
               <div>
                 <p className="text-xs text-gray-400">Official Support Email</p>
                 <a 
-                  href="mailto:Kondrashravankumar@gmail.com" 
+                  href="mailto:arivuzai@gmail.com" 
                   className="text-sm font-semibold text-white hover:text-[#EC4899] transition"
                 >
-                  Kondrashravankumar@gmail.com
+                  arivuzai@gmail.com
                 </a>
               </div>
             </div>
@@ -106,7 +106,7 @@ export default function ContactPage() {
         <div className="bg-[#080c14] border border-gray-800 rounded-xl p-5 text-center text-xs text-gray-400">
           <p>
             WinDeclare website and mobile application services are owned and operated by{' '}
-            <strong className="text-gray-200">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship).
+            <strong className="text-gray-200">ArivuZ</strong> (Sole Proprietorship).
           </p>
         </div>
       </main>

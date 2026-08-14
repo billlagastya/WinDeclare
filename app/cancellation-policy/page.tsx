@@ -6,7 +6,7 @@ import { RefreshCw, Clock, AlertTriangle, ShieldCheck } from 'lucide-react';
 
 export const metadata: Metadata = {
   title: 'Refund & Cancellation Policy | WinDeclare',
-  description: 'Refund and cancellation policy for WinDeclare venue bookings operated by KONDRA SHRAVAN KUMAR.'
+  description: 'Refund and cancellation policy for WinDeclare venue bookings operated by ArivuZ.'
 };
 
 export default function CancellationPolicyPage() {
@@ -30,7 +30,7 @@ export default function CancellationPolicyPage() {
               1. Business Ownership & Policy Scope
             </h2>
             <p>
-              This Refund & Cancellation Policy applies to all slot bookings, venue rentals, and payment transactions conducted on <strong className="text-white">WinDeclare</strong>, operated by <strong className="text-[#EC4899] font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship).
+              This Refund & Cancellation Policy applies to all slot bookings, venue rentals, and payment transactions conducted on <strong className="text-white">WinDeclare</strong>, operated by <strong className="text-[#EC4899] font-semibold">ArivuZ</strong> (Sole Proprietorship).
             </p>
           </section>
 
@@ -84,8 +84,8 @@ export default function CancellationPolicyPage() {
               If you experienced a double deduction or technical payment failure where a slot was not allocated, please reach out directly to our support team with your booking ID:
             </p>
             <div className="mt-4 p-4 rounded-xl bg-gray-900 border border-gray-800 space-y-1 text-xs text-gray-300 font-mono">
-              <p><strong className="text-white">Legal Entity:</strong> KONDRA SHRAVAN KUMAR (Sole Proprietorship)</p>
-              <p><strong className="text-white">Official Support Email:</strong> Kondrashravankumar@gmail.com</p>
+              <p><strong className="text-white">Legal Entity:</strong> ArivuZ (Sole Proprietorship)</p>
+              <p><strong className="text-white">Official Support Email:</strong> arivuzai@gmail.com</p>
               <p><strong className="text-white">Helpline Phone:</strong> +91 9505737751</p>
               <p><strong className="text-white">Operating Location:</strong> Secunderabad, Telangana, India</p>
             </div>

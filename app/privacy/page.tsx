@@ -5,7 +5,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy | WinDeclare',
-  description: 'Privacy Policy for WinDeclare sports turf platform operated by KONDRA SHRAVAN KUMAR.'
+  description: 'Privacy Policy for WinDeclare sports turf platform operated by ArivuZ.'
 };
 
 export default function PrivacyPage() {
@@ -29,7 +29,7 @@ export default function PrivacyPage() {
               1. Platform & Entity Disclosure
             </h2>
             <p>
-              This Privacy Policy explains how <strong className="text-white">WinDeclare</strong> (&quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;), operated by <strong className="text-[#EC4899] font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship), collects, uses, and safeguards user information when you use our web application to book sports venues.
+              This Privacy Policy explains how <strong className="text-white">WinDeclare</strong> (&quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;), operated by <strong className="text-[#EC4899] font-semibold">ArivuZ</strong> (Sole Proprietorship), collects, uses, and safeguards user information when you use our web application to book sports venues.
             </p>
           </section>
 
@@ -86,8 +86,8 @@ export default function PrivacyPage() {
               For privacy requests or data inquiries, please reach out to our privacy officer:
             </p>
             <div className="mt-3 space-y-1 text-xs text-gray-300 font-mono">
-              <p>Operated by: KONDRA SHRAVAN KUMAR (Sole Proprietorship)</p>
-              <p>Email: Kondrashravankumar@gmail.com</p>
+              <p>Operated by: ArivuZ (Sole Proprietorship)</p>
+              <p>Email: arivuzai@gmail.com</p>
               <p>Phone: +91 9505737751</p>
               <p>Location: Secunderabad, Telangana, India</p>
             </div>

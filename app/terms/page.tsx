@@ -5,7 +5,7 @@ import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Terms & Conditions | WinDeclare',
-  description: 'Terms and Conditions for WinDeclare sports venue booking platform operated by KONDRA SHRAVAN KUMAR.'
+  description: 'Terms and Conditions for WinDeclare sports venue booking platform operated by ArivuZ.'
 };
 
 export default function TermsPage() {
@@ -29,7 +29,7 @@ export default function TermsPage() {
               1. Ownership & Business Structure
             </h2>
             <p>
-              The sports turf and arena booking platform <strong className="text-white">WinDeclare</strong> (&quot;Website&quot;, &quot;Platform&quot;, &quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;) is entirely owned and operated by <strong className="text-[#EC4899] font-semibold">KONDRA SHRAVAN KUMAR</strong> (Sole Proprietorship), registered in Secunderabad, Telangana, India.
+              The sports turf and arena booking platform <strong className="text-white">WinDeclare</strong> (&quot;Website&quot;, &quot;Platform&quot;, &quot;We&quot;, &quot;Us&quot;, &quot;Our&quot;) is entirely owned and operated by <strong className="text-[#EC4899] font-semibold">ArivuZ</strong> (Sole Proprietorship), registered in Secunderabad, Telangana, India.
             </p>
             <p className="mt-3">
               By accessing or using WinDeclare to browse or book sports grounds, box cricket turfs, football fields, or badminton courts, you agree to be bound by these Terms & Conditions.
@@ -89,8 +89,8 @@ export default function TermsPage() {
               For any legal or contractual inquiries, please contact:
             </p>
             <div className="mt-3 space-y-1 text-xs text-gray-300 font-mono">
-              <p>Legal Entity Name: KONDRA SHRAVAN KUMAR (Sole Proprietorship)</p>
-              <p>Email: Kondrashravankumar@gmail.com</p>
+              <p>Legal Entity Name: ArivuZ (Sole Proprietorship)</p>
+              <p>Email: arivuzai@gmail.com</p>
               <p>Phone: +91 9505737751</p>
               <p>Address: Secunderabad, Telangana, India</p>
             </div>

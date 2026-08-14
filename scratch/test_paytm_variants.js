@@ -58,7 +58,7 @@ async function testVariant(label, host, website, channelInHead) {
     mid: mid,
     websiteName: website,
     orderId: orderId,
-    callbackUrl: "https://win-declare.vercel.app/api/paytm/callback",
+    callbackUrl: "https://windeclare.com/api/paytm/callback",
     txnAmount: {
       value: "100.00",
       currency: "INR"

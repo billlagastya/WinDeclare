@@ -12,7 +12,7 @@ async function compareChecksums() {
     mid: mid,
     websiteName: website,
     orderId: orderId,
-    callbackUrl: "https://win-declare.vercel.app/api/paytm/callback",
+    callbackUrl: "https://windeclare.com/api/paytm/callback",
     txnAmount: {
       value: "800.00",
       currency: "INR"

@@ -9,7 +9,7 @@ const getBaseUrl = (req: Request) => {
     return `${protocol}://${host}`;
   }
   // Fallback to environment variable or hardcoded domain
-  const rawEnvUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://win-declare.vercel.app';
+  const rawEnvUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://windeclare.com';
   return rawEnvUrl.replace(/\[\vert{}\]|\(\vert{}\)/g, '').replace(/\/$/, '');
 };
 

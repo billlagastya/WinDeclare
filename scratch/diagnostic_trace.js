@@ -26,7 +26,7 @@ async function testPaytmInitiate(label, signatureInputFormat) {
   const orderId = `ORD_TEST_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const endpointUrl = `https://${host}/theia/api/v1/initiateTransaction?mid=${mid}&orderId=${orderId}`;
 
-  const callbackUrl = 'https://win-declare.vercel.app/api/paytm/callback';
+  const callbackUrl = 'https://windeclare.com/api/paytm/callback';
   const bodyObj = {
     requestType: "Payment",
     mid: mid,

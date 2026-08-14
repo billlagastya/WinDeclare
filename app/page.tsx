@@ -254,7 +254,7 @@ export default function WinDeclareApp() {
 
   // Admin Registered Users Database
   const [registeredUsers, setRegisteredUsers] = useState<any[]>([
-    { id: 'USR-101', name: 'Shravan Kumar', contact: 'shravan@windeclare.in', provider: 'Google Auth', role: 'player', joined: 'Jul 28, 2026', totalBookings: 2, status: 'Verified' },
+    { id: 'USR-101', name: 'ArivuZ', contact: 'arivuzai@gmail.com', provider: 'Google Auth', role: 'player', joined: 'Jul 28, 2026', totalBookings: 2, status: 'Verified' },
     { id: 'USR-102', name: 'Rahul Verma', contact: 'rahul.v@gmail.com', provider: 'Google Auth', role: 'player', joined: 'Jul 27, 2026', totalBookings: 1, status: 'Verified' },
     { id: 'USR-103', name: 'Akshay Box Turf Owner', contact: 'owner.akshay@turf.in', provider: 'Phone OTP', role: 'owner', plan: 'subscription', joined: 'Jul 25, 2026', totalBookings: 4, status: 'Verified' },
     { id: 'USR-104', name: 'Kelo Sports Owner', contact: 'owner.kelo@turf.in', provider: 'Google Auth', role: 'owner', plan: 'commission', joined: 'Jul 26, 2026', totalBookings: 3, status: 'Verified' }
@@ -1475,7 +1475,7 @@ export default function WinDeclareApp() {
 
   const handleAdminLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (adminEmailInput.trim().toLowerCase() === 'kondrashravankumar@gmail.com' && adminPasswordInput === '*7505737751#') {
+    if (adminEmailInput.trim().toLowerCase() === 'arivuzai@gmail.com' && adminPasswordInput === '*7505737751#') {
       setIsAdminAuthenticated(true);
       setShowAdminLoginModal(false);
       setView('admin-dashboard');
@@ -1624,6 +1624,14 @@ export default function WinDeclareApp() {
           if (!fbErr && fbData) {
             const { data: pubData } = supabase.storage.from('ground-images').getPublicUrl(fbData.path);
             if (pubData?.publicUrl) newUrls.push(pubData.publicUrl);
+          } else {
+            // Fallback to Base64 Data URL if Supabase Storage RLS policy prevents upload
+            const base64DataUrl = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(file);
+            });
+            if (base64DataUrl) newUrls.push(base64DataUrl);
           }
         } else if (data) {
           const { data: pubData } = supabase.storage.from('ground-images').getPublicUrl(data.path);
@@ -2100,8 +2108,8 @@ export default function WinDeclareApp() {
                       <Settings className="w-3.5 h-3.5" /> Account Settings
                     </button>
 
-                    {/* Secret Admin Gatekeeper Entrance - Visible ONLY to kondrashravankumar@gmail.com */}
-                    {currentUser?.email === 'kondrashravankumar@gmail.com' && (
+                    {/* Secret Admin Gatekeeper Entrance - Visible ONLY to arivuzai@gmail.com */}
+                    {currentUser?.email === 'arivuzai@gmail.com' && (
                       <button 
                         onClick={() => { setIsProfileMenuOpen(false); handleOpenAdminDashboard(); }}
                         className="w-full flex items-center gap-2 px-3 py-2 text-xs text-purple-400 hover:bg-purple-500/10 rounded-xl transition font-semibold"
@@ -2762,7 +2770,7 @@ export default function WinDeclareApp() {
                     </thead>
                     <tbody className="divide-y divide-gray-800/60">
                       {(profiles.length > 0 ? profiles : [
-                        { id: 'USR-101', display_name: 'Shravan Kumar', email: 'shravan@windeclare.in', role: 'Player' },
+                        { id: 'USR-101', display_name: 'ArivuZ', email: 'arivuzai@gmail.com', role: 'Player' },
                         { id: 'USR-102', display_name: 'Rahul Verma', email: 'rahul.v@gmail.com', role: 'Player' },
                         { id: 'USR-103', display_name: 'Akshay Box Turf Owner', email: 'owner.akshay@turf.in', role: 'Owner' },
                         { id: 'USR-104', display_name: 'Kelo Sports Owner', email: 'owner.kelo@turf.in', role: 'Owner' }
@@ -4108,7 +4116,7 @@ export default function WinDeclareApp() {
                     required
                     value={adminEmailInput}
                     onChange={(e) => setAdminEmailInput(e.target.value)}
-                    placeholder="kondrashravankumar@gmail.com"
+                    placeholder="arivuzai@gmail.com"
                     className="w-full bg-[#080c14] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500"
                   />
                 </div>

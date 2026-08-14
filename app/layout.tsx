@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://windeclare.com'),
   title: "WinDeclare | Premium Sports Turf & Arena Booking",
   description: "Book premium sports turfs, cricket grounds, football boxes, and badminton courts instantly. Transparent pricing, real-time slot availability, and zero hidden fees.",
   icons: {
