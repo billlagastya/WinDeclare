@@ -159,7 +159,7 @@ export async function initiateOnlinePayment(options: PaymentOptions): Promise<Pa
       if (!response.ok) {
         return {
           success: false,
-          error: data.error || "Cashfree order creation failed"
+          error: data.error || "Payment order creation failed"
         };
       }
 
@@ -167,7 +167,7 @@ export async function initiateOnlinePayment(options: PaymentOptions): Promise<Pa
       if (!paymentSessionId) {
         return {
           success: false,
-          error: "Invalid payment session ID returned from Cashfree server."
+          error: "Invalid payment session ID returned from payment gateway."
         };
       }
 
@@ -185,10 +185,10 @@ export async function initiateOnlinePayment(options: PaymentOptions): Promise<Pa
       };
 
     } catch (err: any) {
-      console.error("Cashfree Checkout Exception:", err);
+      console.error("Payment Checkout Exception:", err);
       return {
         success: false,
-        error: err.message || 'Unknown error during Cashfree payment initiation'
+        error: err.message || 'Unknown error during payment initiation'
       };
     }
   }

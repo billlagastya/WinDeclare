@@ -793,7 +793,7 @@ export default function WinDeclareApp() {
     }
   }, [selectedArena, selectedDateIndex, fetchSlotAvailability]);
 
-  // Handle Return Redirect & Hash Navigation from Paytm / Cashfree Payment Checkout
+  // Handle Return Redirect & Hash Navigation from Payment Checkout
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const urlParams = new URLSearchParams(window.location.search);
@@ -1356,7 +1356,7 @@ export default function WinDeclareApp() {
       }
       fetchSlotAvailability(selectedArena.id, selectedDateIndex);
     } catch (err: any) {
-      console.error("Pending Cashfree booking insert exception:", err);
+      console.error("Pending booking insert exception:", err);
       showToast('❌ Could not start booking. Please try again.');
       return;
     }
@@ -1374,7 +1374,7 @@ export default function WinDeclareApp() {
     });
 
     if (paymentRes && !paymentRes.success && paymentRes.error) {
-      showToast(`❌ Paytm Notice: ${paymentRes.error}`);
+      showToast(`❌ Payment Notice: ${paymentRes.error}`);
     }
   };
 
@@ -4454,7 +4454,7 @@ export default function WinDeclareApp() {
                 onClick={handleConfirmRefundNoticeAndPay}
                 className="flex-1 py-3 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/20"
               >
-                Pay via Paytm / UPI
+                Proceed to Pay
               </button>
             </div>
           </div>

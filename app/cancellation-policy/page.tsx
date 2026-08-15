@@ -17,7 +17,7 @@ export default function CancellationPolicyPage() {
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-12">
         <div className="border-b border-gray-800 pb-6 mb-8">
           <span className="text-xs font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20 inline-block mb-3">
-            Cashfree Compliance Policy
+            Payment Gateway Compliance Policy
           </span>
           <h1 className="text-3xl md:text-4xl font-extrabold text-white">Refund & Cancellation Policy</h1>
           <p className="text-gray-400 text-xs mt-2">Last Updated: August 2026</p>
@@ -56,17 +56,17 @@ export default function CancellationPolicyPage() {
             </ul>
           </section>
 
-          {/* Refund Timeline (Cashfree Standard) */}
+          {/* Refund Timeline */}
           <section className="bg-[#161b22] border border-pink-500/30 rounded-2xl p-6 bg-gradient-to-b from-[#161b22] to-[#12161f]">
             <div className="flex items-center gap-2 text-emerald-400 font-bold mb-3">
               <RefreshCw className="w-5 h-5 shrink-0" />
               <h2 className="text-lg text-white">3. Refund Processing & Gateway Timelines</h2>
             </div>
             <p className="text-white font-medium text-base mb-3">
-              Mandatory Payment Gateway Terms (Cashfree Payments):
+              Mandatory Payment Gateway Terms:
             </p>
             <div className="bg-[#080c14] border border-gray-800 rounded-xl p-4 text-emerald-300 font-semibold text-sm">
-              &quot;Approved refunds, if granted by venue owners, will be processed back to the original payment source within 5 to 7 business days via Cashfree.&quot;
+              &quot;Approved refunds, if granted by venue owners, will be processed back to the original payment source within 5 to 7 business days through authorized payment gateway partners.&quot;
             </div>
             <div className="mt-4 flex items-center gap-3 text-xs text-gray-400">
               <Clock className="w-4 h-4 text-[#EC4899] shrink-0" />

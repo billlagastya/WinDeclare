@@ -48,19 +48,19 @@ export default function PrivacyPage() {
             </ul>
           </section>
 
-          {/* Section 3: Payment Security (Cashfree) */}
+          {/* Section 3: Payment Security */}
           <section className="bg-[#161b22] border border-gray-800 rounded-2xl p-6">
             <h2 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
-              3. Payment Security & Cashfree Gateway Disclosure
+              3. Payment Security & Payment Gateway Disclosure
             </h2>
             <p className="text-emerald-400 font-semibold mb-2">
               🔒 We Do NOT Store Sensitive Payment Information.
             </p>
             <p>
-              WinDeclare integrates <strong className="text-white">Cashfree Payments India Private Limited</strong> for all payment transactions. 
+              All online digital payments on WinDeclare are processed securely through authorized, RBI-compliant payment gateway partners.
             </p>
             <p className="mt-3">
-              WinDeclare does <strong className="text-white">NOT</strong> store, process, or transmit your sensitive payment credentials (such as Credit/Debit Card Numbers, Expiry Dates, CVV, Net Banking Passwords, or UPI PINs) on our servers. All financial payment data is collected directly by Cashfree under PCI-DSS Level 1 certification.
+              WinDeclare does not store credit/debit card numbers, UPI PINs, CVVs, or Net Banking credentials on its servers. Payment transactions are executed directly through encrypted, PCI-DSS compliant checkout systems.
             </p>
           </section>
 

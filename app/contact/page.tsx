@@ -50,7 +50,7 @@ export default function ContactPage() {
             </div>
             <div className="mt-6 pt-4 border-t border-gray-800/80 flex items-center gap-2 text-xs text-emerald-400 font-medium">
               <ShieldCheck className="w-4 h-4" />
-              Cashfree Payments Verified Merchant
+              RBI-Authorized Payment Gateway Secured Merchant
             </div>
           </div>
 

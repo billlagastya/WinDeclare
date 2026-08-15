@@ -57,13 +57,13 @@ export default function TermsPage() {
           {/* Section 3 */}
           <section className="bg-[#161b22] border border-gray-800 rounded-2xl p-6">
             <h2 className="text-lg font-bold text-white mb-3">
-              3. Online Payment Processing (Cashfree Payments)
+              3. Online Payment Processing
             </h2>
             <p>
-              All online digital payments on WinDeclare are processed securely via <strong className="text-white">Cashfree Payments India Private Limited</strong>.
+              All online digital payments on WinDeclare are processed securely through authorized, RBI-compliant payment gateway partners.
             </p>
             <p className="mt-3">
-              WinDeclare does not store credit/debit card numbers, UPI PINs, CVVs, or Net Banking credentials on its servers. Payment transactions are executed directly through Cashfree&apos;s RBI-compliant payment gateway.
+              WinDeclare does not store credit/debit card numbers, UPI PINs, CVVs, or Net Banking credentials on its servers. Payment transactions are executed directly through encrypted, PCI-DSS compliant checkout systems.
             </p>
           </section>
 

@@ -82,7 +82,7 @@ export async function POST(request: Request) {
 
     if (!appId || !secretKey || appId.includes('YOUR_APP_ID') || secretKey.includes('YOUR_SECRET_KEY')) {
       return NextResponse.json(
-        { error: "Cashfree API keys are unconfigured. Please update CASHFREE_APP_ID and CASHFREE_SECRET_KEY in .env.local with valid Cashfree credentials." },
+        { error: "Payment gateway credentials are unconfigured. Please update payment configuration." },
         { status: 400 }
       );
     }
