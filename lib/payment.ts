@@ -1,6 +1,3 @@
-// @ts-ignore
-import { load } from '@cashfreepayments/cashfree-js';
-
 export interface PaymentOptions {
   amount: number;
   bookingId: string;
@@ -10,191 +7,98 @@ export interface PaymentOptions {
   groundId?: number | string;
   bookingDate?: string;
   slots?: string[];
-  provider?: 'PAYTM' | 'CASHFREE' | 'RAZORPAY';
+  productInfo?: string;
+  udf1?: string;
+  udf2?: string;
+  udf3?: string;
+  udf4?: string;
+  udf5?: string;
+  provider?: string;
 }
 
 export interface PaymentResult {
   success: boolean;
-  orderId?: string;
-  txnToken?: string;
+  txnid?: string;
   error?: string;
 }
 
-declare global {
-  interface Window {
-    Cashfree?: any;
-    Paytm?: any;
-  }
-}
-
 export async function initiateOnlinePayment(options: PaymentOptions): Promise<PaymentResult> {
-  const GATEWAY_PROVIDER: 'PAYTM' | 'CASHFREE' | 'RAZORPAY' = options.provider || 'PAYTM';
+  console.log("Initiating PayU Payment Order:", options);
 
-  if (GATEWAY_PROVIDER === 'PAYTM') {
-    console.log("Initiating Paytm Payment Order:", options);
+  try {
+    const response = await fetch('/api/payment/payu-initiate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        booking_id: options.bookingId,
+        amount: options.amount,
+        productinfo: options.productInfo || 'Ground Booking',
+        firstname: options.customerName || 'Player',
+        email: options.customerEmail || 'player@example.com',
+        phone: options.customerPhone || '9999999999',
+        udf1: options.udf1 || options.bookingId,
+        udf2: options.udf2 || '',
+        udf3: options.udf3 || '',
+        udf4: options.udf4 || '',
+        udf5: options.udf5 || ''
+      })
+    });
 
-    try {
-      // 1. Call Next.js API route to initiate Paytm Transaction & get txnToken
-      const response = await fetch('/api/paytm/initiate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ground_id: options.groundId || 1,
-          total_amount: options.amount,
-          booking_id: options.bookingId,
-          booking_date: options.bookingDate,
-          slots: options.slots,
-          customer_details: {
-            customer_name: options.customerName || 'Player',
-            customer_phone: options.customerPhone || '9999999999',
-            customer_email: options.customerEmail || 'player@windeclare.in'
-          }
-        })
-      });
+    const contentType = response.headers.get('content-type') || '';
+    let data: any = {};
 
-      const contentType = response.headers.get('content-type') || '';
-      let data: any = {};
-
-      if (contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        const rawText = await response.text();
-        console.error(`API response was not JSON (Status ${response.status}):`, rawText);
-        return {
-          success: false,
-          error: `Server returned status ${response.status} (non-JSON response). Please check Paytm environment credentials.`
-        };
-      }
-
-      if (!response.ok || !data.success) {
-        console.warn("Paytm initiation failed:", data.error || data);
-        return {
-          success: false,
-          error: data.error || "Failed to create Paytm payment session"
-        };
-      }
-
-      const { txnToken, order_id, mid, paytmEnv } = data;
-      if (!txnToken || !order_id || !mid) {
-        return {
-          success: false,
-          error: "Invalid transaction parameters returned from Paytm server."
-        };
-      }
-
-      // 2. Open Paytm hosted checkout view by creating and submitting a form POST
-      const host = paytmEnv === 'PRODUCTION' ? 'securegw.paytm.in' : 'securestage.paytmpayments.com';
-      const paytmTxnUrl = `https://${host}/theia/api/v1/showPaymentPage?mid=${mid}&orderId=${order_id}`;
-
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = paytmTxnUrl;
-
-      const paytmParams: Record<string, string> = {
-        mid: mid,
-        orderId: order_id,
-        txnToken: txnToken
-      };
-
-      // Append all params (mid, orderId, txnToken) to form body
-      Object.entries(paytmParams).forEach(([key, value]) => {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = key;
-        input.value = value as string;
-        form.appendChild(input);
-      });
-
-      document.body.appendChild(form);
-      form.submit();
-
-      return {
-        success: true,
-        orderId: order_id,
-        txnToken: txnToken
-      };
-
-    } catch (err: any) {
-      console.error("Paytm Checkout Exception:", err);
+    if (contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      const rawText = await response.text();
+      console.error(`API response was not JSON (Status ${response.status}):`, rawText);
       return {
         success: false,
-        error: err.message || 'Unknown error during Paytm payment initiation'
+        error: `Server returned status ${response.status} (non-JSON response). Please check PayU server configuration.`
       };
     }
-  } else if (GATEWAY_PROVIDER === 'CASHFREE') {
-    console.log("Initiating Cashfree Payment Order:", options);
 
-    try {
-      const response = await fetch('/api/cashfree/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ground_id: options.groundId || 1,
-          total_amount: options.amount,
-          booking_id: options.bookingId,
-          booking_date: options.bookingDate,
-          slots: options.slots,
-          customer_details: {
-            customer_name: options.customerName || 'Player',
-            customer_phone: options.customerPhone || '9999999999',
-            customer_email: options.customerEmail || 'player@windeclare.in'
-          }
-        })
-      });
-
-      const contentType = response.headers.get('content-type') || '';
-      let data: any = {};
-
-      if (contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        const rawText = await response.text();
-        console.error(`API response was not JSON (Status ${response.status}):`, rawText);
-        return {
-          success: false,
-          error: `Server returned status ${response.status} (non-JSON response).`
-        };
-      }
-
-      if (!response.ok) {
-        return {
-          success: false,
-          error: data.error || "Payment order creation failed"
-        };
-      }
-
-      const paymentSessionId = data.payment_session_id;
-      if (!paymentSessionId) {
-        return {
-          success: false,
-          error: "Invalid payment session ID returned from payment gateway."
-        };
-      }
-
-      const cashfreeMode = process.env.NEXT_PUBLIC_CASHFREE_ENV === 'PRODUCTION' ? 'production' : 'sandbox';
-      const cashfree = await load({ mode: cashfreeMode });
-
-      cashfree.checkout({
-        paymentSessionId: paymentSessionId,
-        redirectTarget: "_self"
-      });
-
-      return {
-        success: true,
-        orderId: data.order_id
-      };
-
-    } catch (err: any) {
-      console.error("Payment Checkout Exception:", err);
+    if (!response.ok || !data.success) {
       return {
         success: false,
-        error: err.message || 'Unknown error during payment initiation'
+        error: data.error || "Failed to create PayU payment session"
       };
     }
+
+    const { payuUrl, params } = data;
+    if (!payuUrl || !params) {
+      return {
+        success: false,
+        error: "Invalid transaction parameters returned from PayU server."
+      };
+    }
+
+    // Auto-submitting POST form to PayU payment URL
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = payuUrl;
+
+    Object.entries(params).forEach(([key, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = key;
+      input.value = String(value ?? '');
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+
+    return {
+      success: true,
+      txnid: params.txnid
+    };
+
+  } catch (err: any) {
+    console.error("PayU Checkout Exception:", err);
+    return {
+      success: false,
+      error: err.message || 'Unknown error during PayU payment initiation'
+    };
   }
-
-  return {
-    success: false,
-    error: "Unsupported payment provider"
-  };
 }
