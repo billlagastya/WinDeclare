@@ -15,6 +15,9 @@ import { supabase } from '@/lib/supabaseClient';
 import { initiateOnlinePayment } from '@/lib/payment';
 import Footer from '@/components/Footer';
 import EarningsView from '@/components/EarningsView';
+import ReviewModal from '@/components/ReviewModal';
+import GroundReviewsSection from '@/components/GroundReviewsSection';
+import GroundReviewsModal from '@/components/GroundReviewsModal';
 
 interface Arena {
   id: number | string;
@@ -31,6 +34,7 @@ interface Arena {
   pricing_rules?: any;
   rating: number;
   reviews: number;
+  reviews_count?: number;
   amenities: string[];
   sports: string[];
   image: string;
@@ -67,6 +71,7 @@ interface Booking {
   booking_type?: 'online' | 'offline';
   payment_status?: string;
   turf_display_name?: string;
+  ground_id?: number | string;
 }
 
 interface BookedSlot {
@@ -83,6 +88,14 @@ interface Profile {
   phone?: string;
   display_name: string;
   role?: string;
+}
+
+export interface FavoriteGround {
+  id: string;
+  user_id: string;
+  ground_id: string;
+  created_at: string;
+  grounds?: Arena;
 }
 
 const getFormattedDate = (date: Date): string => {
@@ -233,7 +246,13 @@ export default function WinDeclareApp() {
   };
 
   // User Favorites State
-  const [favoriteArenaIds, setFavoriteArenaIds] = useState<number[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [favoriteGroundsData, setFavoriteGroundsData] = useState<any[]>([]);
+
+  // User Verified Reviews & Active Review Modal State
+  const [activeReviewModalBooking, setActiveReviewModalBooking] = useState<{ bookingId: string; groundId: string; groundTitle: string } | null>(null);
+  const [activeReviewsModalGround, setActiveReviewsModalGround] = useState<{ id: string; title: string } | null>(null);
+  const [userReviewedBookingIds, setUserReviewedBookingIds] = useState<string[]>([]);
 
   // Auth States (Google OAuth Only)
   const [currentUser, setCurrentUser] = useState<{ id?: string; name: string; username?: string; phone?: string; email?: string; provider: 'phone' | 'google' | 'password'; role?: string } | null>(null);
@@ -885,46 +904,74 @@ export default function WinDeclareApp() {
     }
   };
 
-  // Fetch Grounds directly from Supabase Database on page load
-  const fetchGroundsFromSupabase = async () => {
+  // Fetch Grounds directly from Supabase Database on page load & re-calculate live rating/reviews
+  const fetchGroundsFromSupabase = useCallback(async () => {
     try {
       const { data, error } = await supabase.from('grounds').select('*');
+      const { data: reviewsData } = await supabase.from('reviews').select('ground_id, rating');
+
+      let reviewStatsMap: Record<string, { sum: number; count: number }> = {};
+      if (reviewsData && reviewsData.length > 0) {
+        reviewsData.forEach((rev: any) => {
+          const gId = String(rev.ground_id);
+          if (!reviewStatsMap[gId]) reviewStatsMap[gId] = { sum: 0, count: 0 };
+          reviewStatsMap[gId].sum += Number(rev.rating || 5);
+          reviewStatsMap[gId].count += 1;
+        });
+      }
 
       if (!error && data && data.length > 0) {
         console.log("DEBUG: Raw Arenas/Grounds Fetched:", data);
-        const mappedGrounds: Arena[] = data.map((item: any, index: number) => ({
-          id: item.id || item.ground_id || (Date.now() + index),
-          title: item.name || item.title || 'Ground Arena',
-          location: item.location || 'Hyderabad',
-          lat: Number(item.lat || item.latitude || 17.4399),
-          lng: Number(item.lng || item.longitude || 78.5082),
-          latitude: Number(item.lat || item.latitude || 17.4399),
-          longitude: Number(item.lng || item.longitude || 78.5082),
-          price: Number(item.price_per_hour || item.price || 1000),
-          price_per_hour: Number(item.price_per_hour || item.price || 1000),
-          pricing_rules: item.pricing_rules || null,
-          rating: item.rating || 5.0,
-          reviews: item.reviews || 1,
-          amenities: item.facilities || item.amenities || ['Changing Rooms', 'Washrooms', 'Parking'],
-          sports: item.sports || ['Cricket', 'Football'],
-          images: Array.isArray(item.images) ? item.images : (item.images ? (typeof item.images === 'string' ? JSON.parse(item.images) : [item.images]) : []),
-          image: (Array.isArray(item.images) && item.images.length > 0 && item.images[0]) ? item.images[0] : (item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'),
-          locationUrl: item.location_url || item.locationUrl || '',
-          plan: item.plan || 'subscription',
-          plan_type: item.plan_type || (item.plan === 'commission' ? 'commission' : (item.plan === 'hybrid' ? 'hybrid' : 'free')),
-          cashfree_vendor_id: item.cashfree_vendor_id || item.cashfreeVendorId || '',
-          ownerEmail: item.owner_email || item.ownerEmail || 'owner@turf.in',
-          owner_id: item.owner_id || item.user_id || item.ownerId || '',
-          user_id: item.user_id || item.owner_id || item.userId || '',
-          ownerUpiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
-          ownerQrCodeUrl: item.qr_code_url || item.ownerQrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${item.upi_id || item.owner_upi_id || 'owner@okaxis'}`,
-          upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
-          whatsappNumber: item.whatsapp_number || item.whatsappNumber || '',
-          status: item.status || 'approved',
-          is_verified: item.is_verified !== undefined && item.is_verified !== null ? Boolean(item.is_verified) : true
-        }));
+        const mappedGrounds: Arena[] = data.map((item: any, index: number) => {
+          const gId = String(item.id || item.ground_id);
+          const stats = reviewStatsMap[gId];
+          const hasReviews = stats && stats.count > 0;
+          const calculatedAvg = hasReviews ? Math.round((stats.sum / stats.count) * 10) / 10 : null;
+          const count = hasReviews ? stats.count : (item.reviews_count ?? item.reviews ?? 0);
+          const ratingVal = calculatedAvg !== null ? calculatedAvg : Number(item.rating || 5.0);
+
+          return {
+            id: item.id || item.ground_id || (Date.now() + index),
+            title: item.name || item.title || 'Ground Arena',
+            location: item.location || 'Hyderabad',
+            lat: Number(item.lat || item.latitude || 17.4399),
+            lng: Number(item.lng || item.longitude || 78.5082),
+            latitude: Number(item.lat || item.latitude || 17.4399),
+            longitude: Number(item.lng || item.longitude || 78.5082),
+            price: Number(item.price_per_hour || item.price || 1000),
+            price_per_hour: Number(item.price_per_hour || item.price || 1000),
+            pricing_rules: item.pricing_rules || null,
+            rating: ratingVal,
+            reviews: count,
+            reviews_count: count,
+            amenities: item.facilities || item.amenities || ['Changing Rooms', 'Washrooms', 'Parking'],
+            sports: item.sports || ['Cricket', 'Football'],
+            images: Array.isArray(item.images) ? item.images : (item.images ? (typeof item.images === 'string' ? JSON.parse(item.images) : [item.images]) : []),
+            image: (Array.isArray(item.images) && item.images.length > 0 && item.images[0]) ? item.images[0] : (item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'),
+            locationUrl: item.location_url || item.locationUrl || '',
+            plan: item.plan || 'subscription',
+            plan_type: item.plan_type || (item.plan === 'commission' ? 'commission' : (item.plan === 'hybrid' ? 'hybrid' : 'free')),
+            cashfree_vendor_id: item.cashfree_vendor_id || item.cashfreeVendorId || '',
+            ownerEmail: item.owner_email || item.ownerEmail || 'owner@turf.in',
+            owner_id: item.owner_id || item.user_id || item.ownerId || '',
+            user_id: item.user_id || item.owner_id || item.userId || '',
+            ownerUpiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
+            ownerQrCodeUrl: item.qr_code_url || item.ownerQrCodeUrl || `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=${item.upi_id || item.owner_upi_id || 'owner@okaxis'}`,
+            upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
+            whatsappNumber: item.whatsapp_number || item.whatsappNumber || '',
+            status: item.status || 'approved',
+            is_verified: item.is_verified !== undefined && item.is_verified !== null ? Boolean(item.is_verified) : true
+          };
+        });
 
         setArenas(mappedGrounds);
+
+        // Update currently selected arena if active in detail view
+        setSelectedArena(prev => {
+          if (!prev) return null;
+          const updated = mappedGrounds.find(g => String(g.id) === String(prev.id));
+          return updated ? updated : prev;
+        });
 
         // Re-hydrate slotPrices state on refresh if ground.pricing_rules exists
         const firstWithRules = mappedGrounds.find(g => g.pricing_rules);
@@ -941,7 +988,7 @@ export default function WinDeclareApp() {
     } catch (e) {
       console.error("Error fetching grounds from Supabase:", e);
     }
-  };
+  }, []);
 
   // Admin Actions: Approve or Reject Ground
   const handleApproveGround = async (groundId: number | string) => {
@@ -1050,6 +1097,25 @@ export default function WinDeclareApp() {
       return { ...ground, calculatedDistance: null };
     });
   }, [arenas, userLocation]);
+
+  // Memoize Player Favorite Grounds for profile view at top level
+  const playerFavoriteGrounds = useMemo(() => {
+    const localMatches = groundsWithDistance.filter(a => favoriteIds.includes(String(a.id)));
+    const localMatchedIds = new Set(localMatches.map(a => String(a.id)));
+    const extraJoined = favoriteGroundsData
+      .filter(g => g && (g.id || g.ground_id) && favoriteIds.includes(String(g.id || g.ground_id)) && !localMatchedIds.has(String(g.id || g.ground_id)))
+      .map(g => ({
+        id: g.id || g.ground_id,
+        title: g.title || g.name || 'Sports Ground',
+        location: g.location || 'Location unavailable',
+        price: g.price || g.price_per_hour || 0,
+        rating: g.rating || 5.0,
+        reviews: g.reviews_count || g.reviews || 0,
+        reviews_count: g.reviews_count || g.reviews || 0,
+        image: g.image || (g.images && g.images[0]) || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'
+      }));
+    return [...localMatches, ...extraJoined];
+  }, [groundsWithDistance, favoriteIds, favoriteGroundsData]);
 
   const sportsList = ['Cricket', 'Basketball', 'Football', 'Tennis', 'Kabaddi', 'Badminton', 'Volleyball', 'Pickleball'];
   const amenitiesList = ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen', 'Bowling Machine'];
@@ -1180,21 +1246,25 @@ export default function WinDeclareApp() {
   // Fetch user favorites from Supabase table filtering strictly by currentUser.id
   useEffect(() => {
     if (!currentUser?.id) {
-      setFavoriteArenaIds([]);
+      setFavoriteIds([]);
+      setFavoriteGroundsData([]);
       return;
     }
     const fetchUserFavorites = async () => {
       try {
         const { data, error } = await supabase
-          .from('favorites')
-          .select('ground_id')
+          .from('favorite_grounds')
+          .select('ground_id, grounds(*)')
           .eq('user_id', currentUser.id);
 
-        if (!error && data && data.length > 0) {
-          const ids = data.map((item: any) => Number(item.ground_id)).filter(Boolean);
-          setFavoriteArenaIds(ids);
+        if (!error && data) {
+          const ids = data.map((item: any) => String(item.ground_id || item.groundId)).filter(Boolean);
+          const joinedGrounds = data.map((item: any) => item.grounds).filter(Boolean);
+          setFavoriteIds(ids);
+          setFavoriteGroundsData(joinedGrounds);
         } else {
-          setFavoriteArenaIds([]);
+          setFavoriteIds([]);
+          setFavoriteGroundsData([]);
         }
       } catch (err) {
         console.error("Error fetching user favorites:", err);
@@ -1203,34 +1273,62 @@ export default function WinDeclareApp() {
     fetchUserFavorites();
   }, [currentUser]);
 
-  // TOGGLE FAVORITE ARENA HANDLER WITH USER ISOLATION
-  const toggleFavorite = async (arenaId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
+  // Fetch reviewed booking IDs for currentUser to display "Rate & Review" or "✓ Reviewed"
+  const fetchUserReviewedBookings = useCallback(async () => {
+    if (!currentUser?.id) {
+      setUserReviewedBookingIds([]);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('booking_id')
+        .eq('user_id', currentUser.id);
+
+      if (!error && data) {
+        const ids = data.map((r: any) => String(r.booking_id)).filter(Boolean);
+        setUserReviewedBookingIds(ids);
+      } else {
+        setUserReviewedBookingIds([]);
+      }
+    } catch (err) {
+      console.error('Error fetching reviewed booking IDs:', err);
+    }
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    fetchUserReviewedBookings();
+  }, [fetchUserReviewedBookings]);
+
+  // TOGGLE FAVORITE GROUND HANDLER WITH USER ISOLATION
+  const toggleFavorite = async (groundId: number | string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     if (!currentUser) {
       setShowAuthModal(true);
       showToast('🔒 Please sign in to save favorite grounds!');
       return;
     }
 
-    const isFav = favoriteArenaIds.includes(arenaId);
-    const updated = isFav 
-      ? favoriteArenaIds.filter(id => id !== arenaId)
-      : [...favoriteArenaIds, arenaId];
+    const strId = String(groundId);
+    const isFav = favoriteIds.includes(strId);
     
-    setFavoriteArenaIds(updated);
+    setFavoriteIds(prev => 
+      isFav ? prev.filter(id => id !== strId) : [...prev, strId]
+    );
     showToast(isFav ? 'Removed from Favorites' : '❤️ Added to Favorites!');
 
     try {
       if (isFav) {
         await supabase
-          .from('favorites')
+          .from('favorite_grounds')
           .delete()
           .eq('user_id', currentUser.id)
-          .eq('ground_id', arenaId);
+          .eq('ground_id', strId);
+        setFavoriteGroundsData(prev => prev.filter(g => String(g.id || g.ground_id) !== strId));
       } else {
         await supabase
-          .from('favorites')
-          .insert([{ user_id: currentUser.id, ground_id: arenaId }]);
+          .from('favorite_grounds')
+          .insert([{ user_id: currentUser.id, ground_id: strId }]);
       }
     } catch (err) {
       console.warn("Supabase favorite toggle notice:", err);
@@ -2034,7 +2132,7 @@ export default function WinDeclareApp() {
                   view === 'browse' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-bold' : 'text-gray-300 hover:text-white'
                 }`}
               >
-                Browse Turfs
+                Browse Grounds
               </button>
 
               {/* PROFILE DROPDOWN WITH DUAL-ROLE SWITCHER */}
@@ -2070,8 +2168,8 @@ export default function WinDeclareApp() {
                       onClick={() => { setProfileTab('favorites'); setView('profile'); setIsProfileMenuOpen(false); }}
                       className="w-full flex items-center justify-between px-3 py-2 text-xs text-gray-300 hover:bg-pink-500/10 hover:text-[#EC4899] rounded-xl transition"
                     >
-                      <span className="flex items-center gap-2"><Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> Favorite Turfs</span>
-                      <span className="text-gray-400 text-[10px]">{favoriteArenaIds.length}</span>
+                      <span className="flex items-center gap-2"><Heart className="w-3.5 h-3.5 text-rose-500 fill-rose-500" /> Favorite Grounds</span>
+                      <span className="text-gray-400 text-[10px]">{favoriteIds.length}</span>
                     </button>
 
                     {/* DUAL-ROLE SWITCHER BUTTON (PLAYER / OWNER) WITH GUEST GATEKEEPER */}
@@ -2225,7 +2323,7 @@ export default function WinDeclareApp() {
               {groundsWithDistance
                 .filter(a => (a.is_verified !== false && a.status !== 'pending' && a.status !== 'rejected') && (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
                 .map((arena) => {
-                  const isFav = favoriteArenaIds.includes(Number(arena.id));
+                  const isFav = favoriteIds.includes(String(arena.id));
                   const cardImage = (arena.images && arena.images.length > 0 && arena.images[0])
                     ? arena.images[0]
                     : (arena.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop');
@@ -2244,7 +2342,7 @@ export default function WinDeclareApp() {
                           
                           {/* Favorite Button */}
                           <button 
-                            onClick={(e) => toggleFavorite(Number(arena.id), e)}
+                            onClick={(e) => toggleFavorite(String(arena.id), e)}
                             className="absolute top-3 right-3 bg-black/60 backdrop-blur p-2 rounded-xl border border-white/10 hover:scale-110 transition z-10"
                           >
                             <Heart className={`w-4 h-4 ${isFav ? 'fill-rose-500 text-rose-500' : 'text-white'}`} />
@@ -2264,9 +2362,24 @@ export default function WinDeclareApp() {
                             </div>
                           )}
 
-                          <div className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-bold text-[#EC4899] px-2.5 py-1 rounded-md flex items-center gap-1">
-                            <Star className="w-3.5 h-3.5 fill-[#EC4899] text-[#EC4899]" /> {arena.rating} ({arena.reviews})
-                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveReviewsModalGround({ id: String(arena.id), title: arena.title });
+                            }}
+                            className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-extrabold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1 border border-amber-400/20 shadow-md cursor-pointer hover:scale-105 transition-transform z-10"
+                            title="Click to view verified reviews"
+                          >
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                            {((arena.reviews_count ?? arena.reviews ?? 0) === 0) ? (
+                              <span>New</span>
+                            ) : (
+                              <span>
+                                {arena.rating ? Number(arena.rating).toFixed(1) : '5.0'} ({arena.reviews_count ?? arena.reviews ?? 0})
+                              </span>
+                            )}
+                          </button>
 
                         </div>
 
@@ -2336,8 +2449,23 @@ export default function WinDeclareApp() {
             </div>
 
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3">
                 <h1 className="text-4xl font-black text-white tracking-tight">{selectedArena.title}</h1>
+                <button
+                  type="button"
+                  onClick={() => setActiveReviewsModalGround({ id: String(selectedArena.id), title: selectedArena.title })}
+                  className="flex items-center gap-1.5 bg-amber-400/10 border border-amber-400/20 hover:border-amber-400/50 px-3 py-1.5 rounded-xl text-amber-400 text-xs font-black shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                  title="Click to view verified reviews"
+                >
+                  <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                  {((selectedArena.reviews_count ?? selectedArena.reviews ?? 0) === 0) ? (
+                    <span>New</span>
+                  ) : (
+                    <span>
+                      {selectedArena.rating ? Number(selectedArena.rating).toFixed(1) : '5.0'} ({selectedArena.reviews_count ?? selectedArena.reviews ?? 0})
+                    </span>
+                  )}
+                </button>
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2475,6 +2603,14 @@ export default function WinDeclareApp() {
                 </div>
               )}
             </div>
+
+            {/* VERIFIED PLAYER REVIEWS SECTION */}
+            <GroundReviewsSection
+              groundId={selectedArena.id}
+              groundTitle={selectedArena.title}
+              initialRating={selectedArena.rating}
+              initialReviewsCount={selectedArena.reviews}
+            />
           </main>
         )}
 
@@ -3530,7 +3666,7 @@ export default function WinDeclareApp() {
                                       </div>
                                       <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
                                       <div className="flex gap-2 text-[11px] text-[#EC4899] mt-1 font-semibold">
-                                        <span>₹{arena.price}/hr</span> • <span>★ {arena.rating}</span>
+                                        <span>₹{arena.price}/hr</span> • <span>{((arena.reviews_count ?? arena.reviews ?? 0) === 0) ? '★ New' : `★ ${arena.rating ? Number(arena.rating).toFixed(1) : '5.0'} (${arena.reviews_count ?? arena.reviews ?? 0})`}</span>
                                       </div>
                                     </div>
                                   </div>
@@ -3866,8 +4002,6 @@ export default function WinDeclareApp() {
             );
           });
 
-          const playerFavoriteArenas = groundsWithDistance.filter(a => favoriteArenaIds.includes(Number(a.id)));
-
           return (
             <main className="max-w-3xl mx-auto px-4 py-8 space-y-6">
               <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
@@ -3896,7 +4030,7 @@ export default function WinDeclareApp() {
                     onClick={() => setProfileTab('favorites')}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${profileTab === 'favorites' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black' : 'text-gray-400 hover:text-white'}`}
                   >
-                    Favorites ({playerFavoriteArenas.length})
+                    Favorites ({favoriteIds.length})
                   </button>
                   <button
                     onClick={() => setProfileTab('account')}
@@ -3947,9 +4081,27 @@ export default function WinDeclareApp() {
                             <p className="text-[10px] text-gray-400">{b.date} • {b.slots}</p>
                           </div>
 
-                          <div className="text-right">
+                          <div className="text-right space-y-1.5">
                             <span className="text-sm font-bold text-white font-mono block">₹{b.amount}</span>
-                            <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">✓ Confirmed</span>
+                            <div className="flex items-center gap-2 justify-end">
+                              <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">✓ Confirmed</span>
+                              {userReviewedBookingIds.includes(String(b.id)) ? (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded">
+                                  <Star className="w-2.5 h-2.5 fill-amber-400" /> Reviewed
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => setActiveReviewModalBooking({
+                                    bookingId: String(b.id),
+                                    groundId: String(b.ground_id || b.arenaId || selectedArena?.id || '162d8c3d-bfc2-40f8-a5d6-de881096cc78'),
+                                    groundTitle: b.turf_display_name || b.arenaTitle || 'Sports Ground'
+                                  })}
+                                  className="inline-flex items-center gap-1 text-[10px] font-extrabold text-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 px-2.5 py-1 rounded-lg transition shadow-md shadow-amber-500/20"
+                                >
+                                  <Star className="w-3 h-3 fill-black" /> Rate & Review
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -3962,35 +4114,35 @@ export default function WinDeclareApp() {
               {profileTab === 'favorites' && (
                 <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 space-y-4 shadow-xl">
                   <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <Heart className="w-4 h-4 text-rose-500 fill-rose-500" /> Saved Favorite Turfs
+                    <Heart className="w-4 h-4 text-rose-500 fill-rose-500" /> Saved Favorite Grounds
                   </h3>
 
-                  {playerFavoriteArenas.length === 0 ? (
+                  {playerFavoriteGrounds.length === 0 ? (
                     <div className="text-center py-12 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-2xl space-y-3">
                       <Heart className="w-8 h-8 text-rose-500 mx-auto opacity-70" />
-                      <h4 className="text-sm font-bold text-white">No saved favorite turfs</h4>
-                      <p className="text-xs text-gray-400">Click the heart icon on any turf card to save it here!</p>
+                      <h4 className="text-sm font-bold text-white">No favorite grounds added yet</h4>
+                      <p className="text-xs text-gray-400">Click the heart icon on any ground card to save it here!</p>
                       <button 
                         onClick={() => setView('browse')}
                         className="px-4 py-2 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/20"
                       >
-                        Explore Turfs
+                        Browse Grounds
                       </button>
                     </div>
                   ) : (
                     <div className="grid md:grid-cols-2 gap-4">
-                      {playerFavoriteArenas.map((arena) => (
+                      {playerFavoriteGrounds.map((arena) => (
                         <div key={arena.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <img src={arena.image} alt={arena.title} className="w-12 h-12 rounded-lg object-cover" />
                             <div>
                               <h4 className="font-bold text-white text-xs">{arena.title}</h4>
                               <p className="text-[10px] text-gray-400">{arena.location}</p>
-                              <p className="text-[10px] font-bold text-[#EC4899] mt-0.5">₹{arena.price}/hr • ★ {arena.rating}</p>
+                              <p className="text-[10px] font-bold text-[#EC4899] mt-0.5">₹{arena.price}/hr • {(((arena as any).reviews_count ?? (arena as any).reviews ?? 0) === 0) ? '★ New' : `★ ${arena.rating ? Number(arena.rating).toFixed(1) : '5.0'} (${(arena as any).reviews_count ?? (arena as any).reviews ?? 0})`}</p>
                             </div>
                           </div>
                           <button 
-                            onClick={(e) => toggleFavorite(Number(arena.id), e)}
+                            onClick={(e) => toggleFavorite(String(arena.id), e)}
                             className="p-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 transition"
                           >
                             <Heart className="w-4 h-4 fill-rose-500 text-rose-500" />
@@ -4702,6 +4854,37 @@ export default function WinDeclareApp() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* VERIFIED PLAYER REVIEW MODAL */}
+      {activeReviewModalBooking && (
+        <ReviewModal
+          isOpen={!!activeReviewModalBooking}
+          onClose={() => setActiveReviewModalBooking(null)}
+          groundId={activeReviewModalBooking.groundId}
+          groundTitle={activeReviewModalBooking.groundTitle}
+          bookingId={activeReviewModalBooking.bookingId}
+          currentUser={currentUser}
+          onReviewSubmitted={() => {
+            fetchUserReviewedBookings();
+            fetchGroundsFromSupabase();
+          }}
+          onSuccess={() => {
+            fetchUserReviewedBookings();
+            fetchGroundsFromSupabase();
+          }}
+          showToast={showToast}
+        />
+      )}
+
+      {/* PUBLIC GROUND REVIEWS MODAL */}
+      {activeReviewsModalGround && (
+        <GroundReviewsModal
+          isOpen={!!activeReviewsModalGround}
+          onClose={() => setActiveReviewsModalGround(null)}
+          groundId={activeReviewsModalGround.id}
+          groundName={activeReviewsModalGround.title}
+        />
       )}
 
       {/* Footer */}
