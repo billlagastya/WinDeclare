@@ -23,6 +23,8 @@ interface Arena {
   id: number | string;
   title: string;
   name?: string;
+  description?: string;
+  sport_type?: string;
   location: string;
   lat: number;
   lng: number;
@@ -300,6 +302,7 @@ export default function WinDeclareApp() {
   // Form selections for new venue
   const [newArenaName, setNewArenaName] = useState<string>('');
   const [newArenaLocation, setNewArenaLocation] = useState<string>('');
+  const [newArenaDescription, setNewArenaDescription] = useState<string>('');
   const [newArenaPrice, setNewArenaPrice] = useState<number>(1200);
   const [newArenaEmail, setNewArenaEmail] = useState<string>('');
   const [newArenaLocationUrl, setNewArenaLocationUrl] = useState<string>('');
@@ -322,6 +325,7 @@ export default function WinDeclareApp() {
   const [editingTurf, setEditingTurf] = useState<Arena | null>(null);
   const [editingTurfTitle, setEditingTurfTitle] = useState<string>('');
   const [editingTurfLocation, setEditingTurfLocation] = useState<string>('');
+  const [editingTurfDescription, setEditingTurfDescription] = useState<string>('');
   const [editingTurfPrice, setEditingTurfPrice] = useState<number>(1200);
   const [editingTurfLocationUrl, setEditingTurfLocationUrl] = useState<string>('');
   const [editingTurfWhatsappNumber, setEditingTurfWhatsappNumber] = useState<string>('');
@@ -930,9 +934,14 @@ export default function WinDeclareApp() {
           const count = hasReviews ? stats.count : (item.reviews_count ?? item.reviews ?? 0);
           const ratingVal = calculatedAvg !== null ? calculatedAvg : Number(item.rating || 5.0);
 
+          const rawSports = Array.isArray(item.sports) ? item.sports : (typeof item.sport_type === 'string' ? item.sport_type.split(',').map((s: string) => s.trim()) : (item.sports || ['Cricket', 'Football']));
+          const rawSportType = item.sport_type || (Array.isArray(item.sports) ? item.sports.join(', ') : '');
+
           return {
             id: item.id || item.ground_id || (Date.now() + index),
             title: item.name || item.title || 'Ground Arena',
+            description: item.description || '',
+            sport_type: rawSportType,
             location: item.location || 'Hyderabad',
             lat: Number(item.lat || item.latitude || 17.4399),
             lng: Number(item.lng || item.longitude || 78.5082),
@@ -945,7 +954,7 @@ export default function WinDeclareApp() {
             reviews: count,
             reviews_count: count,
             amenities: item.facilities || item.amenities || ['Changing Rooms', 'Washrooms', 'Parking'],
-            sports: item.sports || ['Cricket', 'Football'],
+            sports: rawSports,
             images: Array.isArray(item.images) ? item.images : (item.images ? (typeof item.images === 'string' ? JSON.parse(item.images) : [item.images]) : []),
             image: (Array.isArray(item.images) && item.images.length > 0 && item.images[0]) ? item.images[0] : (item.image || item.image_url || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop'),
             locationUrl: item.location_url || item.locationUrl || '',
@@ -1117,7 +1126,28 @@ export default function WinDeclareApp() {
     return [...localMatches, ...extraJoined];
   }, [groundsWithDistance, favoriteIds, favoriteGroundsData]);
 
-  const sportsList = ['Cricket', 'Basketball', 'Football', 'Tennis', 'Kabaddi', 'Badminton', 'Volleyball', 'Pickleball'];
+  // Extract unique sport types dynamically from fetched grounds
+  const availableSports = useMemo(() => {
+    const sportsSet = new Set<string>();
+    
+    groundsWithDistance.forEach((ground: any) => {
+      if (ground.sport_type && typeof ground.sport_type === 'string') {
+        // Handle comma-separated strings or single values
+        ground.sport_type.split(',').forEach((s: string) => {
+          const trimmed = s.trim();
+          if (trimmed) sportsSet.add(trimmed);
+        });
+      } else if (Array.isArray(ground.sports)) {
+        ground.sports.forEach((s: string) => {
+          const trimmed = s.trim();
+          if (trimmed) sportsSet.add(trimmed);
+        });
+      }
+    });
+
+    return ['All', ...Array.from(sportsSet).sort()];
+  }, [groundsWithDistance]);
+
   const amenitiesList = ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen', 'Bowling Machine'];
 
   const today = new Date();
@@ -1767,6 +1797,7 @@ export default function WinDeclareApp() {
     setEditingTurf(arena);
     setEditingTurfTitle(arena.title || '');
     setEditingTurfLocation(arena.location || '');
+    setEditingTurfDescription(arena.description || '');
     setEditingTurfPrice(arena.price || 1200);
     setEditingTurfLocationUrl(arena.locationUrl || '');
     setEditingTurfWhatsappNumber(arena.whatsappNumber || '');
@@ -1799,6 +1830,7 @@ export default function WinDeclareApp() {
       const updatePayload = {
         name: editingTurfTitle,
         location: editingTurfLocation,
+        description: editingTurfDescription?.trim() || null,
         price_per_hour: Number(editingTurfPrice),
         location_url: editingTurfLocationUrl,
         sports: editingTurfSports,
@@ -1901,6 +1933,7 @@ export default function WinDeclareApp() {
     const created: Arena = {
       id: Date.now(),
       title: newArenaName,
+      description: newArenaDescription,
       location: newArenaLocation,
       lat: 17.4399,
       lng: 78.5082,
@@ -1932,6 +1965,7 @@ export default function WinDeclareApp() {
 
         const turfPayload = {
           name: newTurf.name || 'New Turf',
+          description: newArenaDescription?.trim() || null,
           price_per_hour: Number(newTurf.price || 0) || 1000,
           location_url: newTurf.locationUrl || '',
           qr_code_url: qrCodeUrl || '',
@@ -2300,28 +2334,41 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
-              {/* Sports Chips */}
-              <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar border-t border-gray-800/60 pt-3">
-                {['All', ...sportsList].map((sport) => (
-                  <button
-                    key={sport}
-                    onClick={() => setSelectedSport(sport)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                      selectedSport === sport
-                        ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold shadow-md'
-                        : 'bg-[#080c14] border border-gray-800 text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    {sport}
-                  </button>
-                ))}
+              {/* Sport Filter Pills UI */}
+              <div className="flex items-center gap-2 overflow-x-auto py-2 no-scrollbar border-t border-gray-800/60 pt-3">
+                {availableSports.map((sport) => {
+                  const isActive = selectedSport.toLowerCase() === sport.toLowerCase();
+                  return (
+                    <button
+                      key={sport}
+                      onClick={() => setSelectedSport(sport)}
+                      className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+                        isActive
+                          ? 'bg-gradient-to-r from-pink-500 to-indigo-600 text-white shadow-md shadow-pink-500/20'
+                          : 'bg-zinc-900/80 text-zinc-400 border border-zinc-800 hover:text-white hover:border-zinc-700'
+                      }`}
+                    >
+                      {sport}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
             {/* Arenas Grid */}
             <div className="grid md:grid-cols-3 gap-6">
               {groundsWithDistance
-                .filter(a => (a.is_verified !== false && a.status !== 'pending' && a.status !== 'rejected') && (selectedSport === 'All' || a.sports.includes(selectedSport)) && a.price <= maxPrice && (a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase())))
+                .filter(a => {
+                  const isApproved = a.is_verified !== false && a.status !== 'pending' && a.status !== 'rejected';
+                  const matchesSport = selectedSport.toLowerCase() === 'all' || (
+                    (a.sport_type && typeof a.sport_type === 'string' && a.sport_type.toLowerCase().includes(selectedSport.toLowerCase())) ||
+                    (Array.isArray(a.sports) && a.sports.some(s => s.toLowerCase() === selectedSport.toLowerCase() || s.toLowerCase().includes(selectedSport.toLowerCase())))
+                  );
+                  const matchesPrice = a.price <= maxPrice;
+                  const matchesSearch = a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase());
+                  
+                  return isApproved && matchesSport && matchesPrice && matchesSearch;
+                })
                 .map((arena) => {
                   const isFav = favoriteIds.includes(String(arena.id));
                   const cardImage = (arena.images && arena.images.length > 0 && arena.images[0])
@@ -2493,6 +2540,21 @@ export default function WinDeclareApp() {
             </div>
 
             <div className="bg-[#0b101d] border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-6">
+              {/* Ground Description Card */}
+              {selectedArena?.description && (
+                <div className="p-4 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 backdrop-blur-md">
+                  <div className="flex items-center gap-2 mb-2 text-xs font-semibold tracking-wider text-zinc-400 uppercase">
+                    <svg className="w-4 h-4 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Ground Description
+                  </div>
+                  <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-line">
+                    {selectedArena.description}
+                  </p>
+                </div>
+              )}
+
               {/* FEATURE 3: Facilities Available Section */}
               <div className="space-y-3 pb-2 border-b border-gray-800/80">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
@@ -3367,6 +3429,17 @@ export default function WinDeclareApp() {
                                   onChange={(e) => setNewArenaLocation(e.target.value)}
                                   placeholder="Gachibowli, Hyderabad" 
                                   className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Ground Description</label>
+                                <textarea 
+                                  rows={3}
+                                  value={newArenaDescription}
+                                  onChange={(e) => setNewArenaDescription(e.target.value)}
+                                  placeholder="Enter details about pitch quality, rules, facilities, lighting..."
+                                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#EC4899] resize-none"
                                 />
                               </div>
 
@@ -4653,6 +4726,17 @@ export default function WinDeclareApp() {
                     className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899]" 
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Ground Description</label>
+                <textarea 
+                  rows={3}
+                  value={editingTurfDescription}
+                  onChange={(e) => setEditingTurfDescription(e.target.value)}
+                  placeholder="Enter details about pitch quality, rules, facilities, lighting..."
+                  className="w-full bg-[#080c14] border border-gray-800 rounded-xl p-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-[#EC4899] resize-none"
+                />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

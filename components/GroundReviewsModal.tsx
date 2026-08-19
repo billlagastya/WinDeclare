@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Star, X, ShieldCheck, MessageSquare, Loader2, Sparkles } from 'lucide-react';
+import { Star, X, ShieldCheck, MessageSquare, Loader2, Sparkles, Plus } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
+import ReviewModal from '@/components/ReviewModal';
 
 export interface GroundReviewItem {
   id: string;
@@ -12,6 +13,7 @@ export interface GroundReviewItem {
   created_at: string;
   user_id?: string;
   user_name?: string;
+  booking_id?: string | null;
   profiles?: {
     id?: string;
     name?: string;
@@ -46,6 +48,22 @@ export default function GroundReviewsModal({
 }: GroundReviewsModalProps) {
   const [reviews, setReviews] = useState<GroundReviewItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isAddReviewOpen, setIsAddReviewOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setCurrentUser(data?.user || null);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(session?.user || null);
+    });
+
+    return () => {
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
 
   // Helper to resolve player display name
   const getDisplayName = (review: any) => {
@@ -77,6 +95,7 @@ export default function GroundReviewsModal({
           created_at,
           user_id,
           user_name,
+          booking_id,
           profiles:user_id (
             display_name,
             full_name,
@@ -96,6 +115,7 @@ export default function GroundReviewsModal({
           created_at: r.created_at,
           user_id: r.user_id,
           user_name: r.user_name,
+          booking_id: r.booking_id || null,
           profiles: r.profiles
         }));
         setReviews(processed);
@@ -140,6 +160,7 @@ export default function GroundReviewsModal({
         created_at: r.created_at,
         user_id: r.user_id,
         user_name: r.user_name,
+        booking_id: r.booking_id || null,
         profiles: profileMap[r.user_id]
       }));
 
@@ -187,19 +208,31 @@ export default function GroundReviewsModal({
                   <span>{totalCount > 0 ? avgRating.toFixed(1) : 'New'}</span>
                 </div>
                 <span className="text-xs text-gray-400 font-medium">
-                  {totalCount} {totalCount === 1 ? 'Verified Review' : 'Verified Reviews'}
+                  {totalCount} {totalCount === 1 ? 'Review' : 'Reviews'}
                 </span>
               </div>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 hover:text-white hover:border-gray-700 transition shrink-0"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {currentUser && (
+              <button
+                type="button"
+                onClick={() => setIsAddReviewOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs hover:opacity-90 transition flex items-center gap-1.5 shadow-md shadow-pink-500/10"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Review</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 hover:text-white hover:border-gray-700 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Content Body */}
@@ -207,14 +240,14 @@ export default function GroundReviewsModal({
           {loading ? (
             <div className="text-center py-12 space-y-2">
               <Loader2 className="w-6 h-6 text-[#EC4899] animate-spin mx-auto" />
-              <p className="text-xs text-gray-400 font-medium">Loading verified player reviews...</p>
+              <p className="text-xs text-gray-400 font-medium">Loading reviews...</p>
             </div>
           ) : reviews.length === 0 ? (
             <div className="text-center py-12 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-2xl space-y-3">
               <MessageSquare className="w-8 h-8 text-[#EC4899] mx-auto opacity-70" />
               <h4 className="text-sm font-bold text-white">No reviews yet</h4>
               <p className="text-xs text-gray-400 max-w-sm mx-auto">
-                Be the first verified player to review this ground! Complete a booking to leave a verified review.
+                Be the first to review this ground!
               </p>
             </div>
           ) : (
@@ -246,9 +279,11 @@ export default function GroundReviewsModal({
                       <div>
                         <div className="flex items-center gap-2">
                           <h4 className="text-xs font-bold text-white">{reviewerName}</h4>
-                          <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md">
-                            <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" /> Verified Booking
-                          </span>
+                          {rev.booking_id && (
+                            <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-extrabold px-1.5 py-0.5 rounded-md">
+                              <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" /> Verified Booking
+                            </span>
+                          )}
                         </div>
                         <span className="text-[10px] text-gray-500 font-mono">
                           {new Date(rev.created_at).toLocaleDateString('en-US', {
@@ -312,8 +347,24 @@ export default function GroundReviewsModal({
           </button>
         </div>
       </div>
+
+      {isAddReviewOpen && (
+        <ReviewModal
+          isOpen={isAddReviewOpen}
+          onClose={() => setIsAddReviewOpen(false)}
+          groundId={groundId}
+          groundTitle={groundName}
+          bookingId={null}
+          currentUser={currentUser}
+          onReviewSubmitted={() => {
+            fetchGroundReviews();
+            setIsAddReviewOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
+
 
 

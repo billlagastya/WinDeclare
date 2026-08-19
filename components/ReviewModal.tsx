@@ -9,7 +9,7 @@ interface ReviewModalProps {
   onClose: () => void;
   groundId: string;
   groundTitle: string;
-  bookingId?: string;
+  bookingId?: string | null;
   currentUser?: { id?: string; name?: string; email?: string } | null;
   onReviewSubmitted?: () => void;
   onSuccess?: () => void;
@@ -90,48 +90,37 @@ export default function ReviewModal({
         return;
       }
 
-      // Fetch display name from profiles table directly
-      let resolvedName = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || (currentUser as any)?.name || 'Verified Player';
+      // Resolve user's display name from profiles or user_metadata
+      let resolvedName = '';
 
-      if (user?.id) {
+      if (activeUser.id) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('display_name, full_name')
-          .eq('id', user.id)
+          .select('display_name, full_name, name, username')
+          .eq('id', activeUser.id)
           .maybeSingle();
 
-        if (profile?.display_name || profile?.full_name) {
-          resolvedName = profile.display_name || profile.full_name;
+        if (profile) {
+          resolvedName =
+            profile.display_name ||
+            profile.full_name ||
+            profile.name ||
+            profile.username ||
+            '';
         }
       }
 
-      // Pre-check if this booking_id has already been reviewed
-      if (bookingId) {
-        const { data: existingReview } = await supabase
-          .from('reviews')
-          .select('id')
-          .eq('booking_id', bookingId)
-          .maybeSingle();
-
-        if (existingReview) {
-          if (showToast) showToast('✓ You have already reviewed this booking!');
-          onReviewSubmitted?.();
-          onSuccess?.();
-          onClose?.();
-          setSubmitting(false);
-          return;
-        }
+      if (!resolvedName) {
+        resolvedName =
+          user?.user_metadata?.display_name ||
+          user?.user_metadata?.full_name ||
+          user?.user_metadata?.name ||
+          user?.user_metadata?.username ||
+          (user?.email ? user.email.split('@')[0] : null) ||
+          (currentUser as any)?.name ||
+          (currentUser as any)?.email?.split('@')[0] ||
+          'Player';
       }
-
-      console.log('Inserting Review Payload:', {
-        ground_id: groundId,
-        user_id: activeUser.id,
-        user_name: resolvedName,
-        booking_id: bookingId || null,
-        rating: Number(rating),
-        comment: comment?.trim() || null,
-        tags: selectedTags || []
-      });
 
       const { data, error } = await supabase
         .from('reviews')
@@ -139,27 +128,46 @@ export default function ReviewModal({
           ground_id: groundId,
           user_id: activeUser.id,
           user_name: resolvedName,
-          booking_id: bookingId ? bookingId : null,
+          booking_id: bookingId || null,
           rating: Number(rating) || 5,
           comment: comment?.trim() || null,
           tags: Array.isArray(selectedTags) ? selectedTags : []
-        })
-        .select();
+        });
 
       if (error) {
-        const errorMessage = error?.message || error?.details || JSON.stringify(error, Object.getOwnPropertyNames(error)) || 'Failed to submit review';
+        const isUniqueError =
+          error.code === '23505' ||
+          String(error.code) === '23505' ||
+          error.message?.includes('23505') ||
+          error.details?.includes('23505') ||
+          error.message?.toLowerCase().includes('unique constraint');
+
+        if (isUniqueError) {
+          const duplicateMsg = bookingId
+            ? 'You have already reviewed this booking.'
+            : 'You have already submitted a community review for this ground.';
+          setErrorMsg(duplicateMsg);
+          if (showToast) showToast(duplicateMsg);
+          setSubmitting(false);
+          return;
+        }
+
+        const errorMessage = error?.message || error?.details || 'Failed to submit review';
         console.error('Supabase review insert error details:', errorMessage);
         setErrorMsg(errorMessage);
         setSubmitting(false);
         return;
       }
 
-      if (showToast) showToast('🌟 Verified review posted successfully!');
+      const successToast = bookingId
+        ? '🌟 Verified review posted successfully!'
+        : '🌟 Review posted successfully!';
+      if (showToast) showToast(successToast);
       onReviewSubmitted?.();
       onSuccess?.();
       onClose?.();
     } catch (err: any) {
-      const catchedErr = err?.message || err?.details || JSON.stringify(err, Object.getOwnPropertyNames(err)) || 'Failed to submit review';
+      const catchedErr = err?.message || err?.details || 'Failed to submit review';
       console.error('Unexpected review error details:', catchedErr);
       setErrorMsg(catchedErr);
     } finally {
@@ -181,7 +189,9 @@ export default function ReviewModal({
               </div>
             </div>
             <div>
-              <h3 className="text-lg font-black text-white tracking-tight">Verified Player Review</h3>
+              <h3 className="text-lg font-black text-white tracking-tight">
+                {bookingId ? 'Verified Player Review' : 'Community Review'}
+              </h3>
               <p className="text-xs text-gray-400 font-medium truncate max-w-[240px]">{groundTitle}</p>
             </div>
           </div>
@@ -300,7 +310,7 @@ export default function ReviewModal({
               ) : (
                 <>
                   <Award className="w-4 h-4" />
-                  Submit Verified Review
+                  {bookingId ? 'Submit Verified Review' : 'Submit Review'}
                 </>
               )}
             </button>
