@@ -80,7 +80,8 @@ interface BookedSlot {
   arenaId: number | string;
   dateIndex: number;
   time: string;
-  source?: 'booking' | 'override';
+  source?: 'booking' | 'override' | 'pending';
+  status?: string;
 }
 
 interface Profile {
@@ -631,86 +632,94 @@ export default function WinDeclareApp() {
 
 
   // Fetch initial bookings from Supabase & hydrate locked slots across page refreshes
-  useEffect(() => {
-    const fetchBookingsFromSupabase = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('bookings')
-          .select('*')
-          .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked')
-          .order('created_at', { ascending: false });
-        console.log("DEBUG FIRST ARENA OBJECT:", arenas[0]);
-        console.log("DEBUG FIRST BOOKING OBJECT:", data?.[0]);
-        if (!error && data && data.length > 0) {
-          const mapped: Booking[] = data.map((item: any) => {
-            const matchedGround = arenas.find(
-              (g: any) =>
-                String(g.id) === String(item.ground_id || item.groundId) ||
-                String(g.uuid || g.ground_id) === String(item.ground_id || item.groundId)
-            );
+  const fetchBookingsFromSupabase = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*')
+        .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked,status.eq.whatsapp_pending,status.eq.pending,payment_status.eq.whatsapp_pending,payment_status.eq.pending')
+        .order('created_at', { ascending: false });
+      console.log("DEBUG FIRST ARENA OBJECT:", arenas[0]);
+      console.log("DEBUG FIRST BOOKING OBJECT:", data?.[0]);
+      if (!error && data && data.length > 0) {
+        const mapped: Booking[] = data.map((item: any) => {
+          const matchedGround = arenas.find(
+            (g: any) =>
+              String(g.id) === String(item.ground_id || item.groundId) ||
+              String(g.uuid || g.ground_id) === String(item.ground_id || item.groundId)
+          );
 
-            const turfDisplayName = item.arena_title || item.arenaTitle || item.arena_name || item.title || matchedGround?.title || matchedGround?.name || matchedGround?.location || 'Sports Turf';
+          const turfDisplayName = item.arena_title || item.arenaTitle || item.arena_name || item.title || matchedGround?.title || matchedGround?.name || matchedGround?.location || 'Sports Turf';
 
-            return {
-              id: item.booking_id || item.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-              arenaId: item.ground_id || item.groundId || 1,
-              arenaTitle: turfDisplayName,
-              turf_display_name: turfDisplayName,
-              date: item.date || item.booking_date || '',
-              dateIndex: item.date_index ?? item.dateIndex ?? 0,
-              slots: typeof item.slots === 'string' ? item.slots : (Array.isArray(item.slots) ? item.slots.map((s: any) => typeof s === 'string' ? s : s.time).join(', ') : ''),
-              amount: Number(item.amount || item.total_amount || 0),
-              userContact: item.user_contact || item.userContact || '',
-              user_id: item.user_id || item.userId || '',
-              planUsed: item.plan_used || item.planUsed || 'subscription',
-              paymentQrUsed: item.payment_qr_used || item.paymentQrUsed || '',
-              booking_type: item.booking_type || 'online',
-              payment_status: item.payment_status || item.status || 'completed',
-              createdAt: item.created_at || item.createdAt || new Date().toISOString()
-            };
+          return {
+            id: item.booking_id || item.id || `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
+            arenaId: item.ground_id || item.groundId || 1,
+            arenaTitle: turfDisplayName,
+            turf_display_name: turfDisplayName,
+            date: item.date || item.booking_date || '',
+            dateIndex: item.date_index ?? item.dateIndex ?? 0,
+            slots: typeof item.slots === 'string' ? item.slots : (Array.isArray(item.slots) ? item.slots.map((s: any) => typeof s === 'string' ? s : s.time).join(', ') : ''),
+            amount: Number(item.amount || item.total_amount || 0),
+            userContact: item.user_contact || item.userContact || '',
+            user_id: item.user_id || item.userId || '',
+            planUsed: item.plan_used || item.planUsed || 'subscription',
+            paymentQrUsed: item.payment_qr_used || item.paymentQrUsed || '',
+            booking_type: item.booking_type || 'online',
+            payment_status: item.payment_status || item.status || 'completed',
+            createdAt: item.created_at || item.createdAt || new Date().toISOString()
+          };
+        });
+
+        setMyBookings(prev => {
+          const combined = [...mapped];
+          prev.forEach(p => {
+            if (!combined.some(c => c.id === p.id)) combined.push(p);
           });
+          return combined;
+        });
 
-          setMyBookings(prev => {
-            const combined = [...mapped];
-            prev.forEach(p => {
-              if (!combined.some(c => c.id === p.id)) combined.push(p);
-            });
-            return combined;
-          });
-
-          // Hydrate locked slots into bookedSlots state so slots show unavailable/disabled (BOOKED) across page refreshes
-          const extractedLockedSlots: BookedSlot[] = [];
-          data.forEach((item: any) => {
-            const arenaId = item.ground_id || item.groundId || 1;
-            let dateIndex = item.date_index ?? item.dateIndex;
-            if (dateIndex === undefined || dateIndex === null || item.booking_date) {
-              for (let i = 0; i < 7; i++) {
-                if (getYYYYMMDD(i) === item.booking_date) {
-                  dateIndex = i;
-                  break;
-                }
+        // Hydrate locked slots into bookedSlots state so slots show unavailable/disabled (BOOKED or PENDING) across page refreshes
+        const extractedLockedSlots: BookedSlot[] = [];
+        data.forEach((item: any) => {
+          const arenaId = item.ground_id || item.groundId || 1;
+          let dateIndex = item.date_index ?? item.dateIndex;
+          if (dateIndex === undefined || dateIndex === null || item.booking_date) {
+            for (let i = 0; i < 7; i++) {
+              if (getYYYYMMDD(i) === item.booking_date) {
+                dateIndex = i;
+                break;
               }
-              if (dateIndex === undefined || dateIndex === null) dateIndex = Number(item.date_index ?? item.dateIndex ?? 0);
-            } else {
-              dateIndex = Number(dateIndex);
             }
-            const slotTimes = extractSlotTimesFromBooking(item);
+            if (dateIndex === undefined || dateIndex === null) dateIndex = Number(item.date_index ?? item.dateIndex ?? 0);
+          } else {
+            dateIndex = Number(dateIndex);
+          }
+          const slotTimes = extractSlotTimesFromBooking(item);
+          const isPending = item.status === 'whatsapp_pending' || item.status === 'pending' || item.payment_status === 'whatsapp_pending' || item.payment_status === 'pending';
 
-            slotTimes.forEach((norm: string) => {
-              if (!extractedLockedSlots.some(s => String(s.arenaId) === String(arenaId) && s.dateIndex === dateIndex && normalizeTimeString(s.time) === norm)) {
-                extractedLockedSlots.push({ arenaId, dateIndex, time: norm, source: 'booking' });
-              }
-            });
+          slotTimes.forEach((norm: string) => {
+            if (!extractedLockedSlots.some(s => String(s.arenaId) === String(arenaId) && s.dateIndex === dateIndex && normalizeTimeString(s.time) === norm)) {
+              extractedLockedSlots.push({
+                arenaId,
+                dateIndex,
+                time: norm,
+                source: isPending ? 'pending' : 'booking',
+                status: isPending ? 'pending' : (item.status || 'confirmed')
+              });
+            }
           });
+        });
 
-          setBookedSlots(extractedLockedSlots);
-        }
-      } catch (e) {
-        console.error("Supabase initial fetch bookings error:", e);
+        setBookedSlots(extractedLockedSlots);
       }
-    };
-    fetchBookingsFromSupabase();
+    } catch (e) {
+      console.error("Supabase initial fetch bookings error:", e);
+    }
   }, [arenas]);
+
+  useEffect(() => {
+    fetchBookingsFromSupabase();
+  }, [fetchBookingsFromSupabase]);
 
   // Fetch Slot Availability for selected arena & date (Player View & Refresh)
   const fetchSlotAvailability = useCallback(async (arenaId: number | string, dateIndex: number) => {
@@ -725,35 +734,26 @@ export default function WinDeclareApp() {
     console.log("Fetching bookings for ground:", searchGroundId, "on date:", selectedDate);
 
     try {
-      // 1. Fetch confirmed bookings for target date
+      // 1. Fetch confirmed and pending bookings for target date
       const { data } = await supabase
         .from('bookings')
-        .select('slots, ground_id, booking_date, slot_time, time_slot')
+        .select('slots, ground_id, booking_date, slot_time, time_slot, status, payment_status')
         .eq('booking_date', selectedDate)
         .or(`ground_id.eq.${searchGroundId},ground_id.eq.${arenaId}`)
-        .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked');
+        .or('status.eq.confirmed,payment_status.eq.completed,status.eq.booked,status.eq.whatsapp_pending,status.eq.pending,payment_status.eq.whatsapp_pending,payment_status.eq.pending');
 
-      const extractedSlots: string[] = [];
+      const extractedSlots: { time: string; isPending: boolean; status: string }[] = [];
       if (data && data.length > 0) {
         data.forEach((b: any) => {
-          if (Array.isArray(b.slots)) {
-            b.slots.forEach((s: any) => {
-              const str = typeof s === 'string' ? s : (s?.time || s?.slot_time || s?.slot);
-              const norm = normalizeTimeString(str);
-              if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
-            });
-          } else if (b.slots && typeof b.slots === 'string') {
-            b.slots.split(',').forEach((t: string) => {
-              const norm = normalizeTimeString(t);
-              if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
-            });
-          } else if (b.time_slot && typeof b.time_slot === 'string') {
-            const norm = normalizeTimeString(b.time_slot);
-            if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
-          } else if (b.slot_time && typeof b.slot_time === 'string') {
-            const norm = normalizeTimeString(b.slot_time);
-            if (norm && !extractedSlots.includes(norm)) extractedSlots.push(norm);
-          }
+          const isPending = b.status === 'whatsapp_pending' || b.status === 'pending' || b.payment_status === 'whatsapp_pending' || b.payment_status === 'pending';
+          const bStatus = isPending ? 'pending' : (b.status || 'confirmed');
+          const slotTimes = extractSlotTimesFromBooking(b);
+
+          slotTimes.forEach((norm: string) => {
+            if (norm && !extractedSlots.some(s => s.time === norm)) {
+              extractedSlots.push({ time: norm, isPending, status: bStatus });
+            }
+          });
         });
       }
 
@@ -783,12 +783,16 @@ export default function WinDeclareApp() {
 
         // Keep items for other dates/arenas, or keep existing booking items if current fetch returned 0 rows
         const otherEntries = prev.filter(b => !(isMatch(b.arenaId) && b.dateIndex === dateIndex));
-        const existingBookingsForTab = prev.filter(b => isMatch(b.arenaId) && b.dateIndex === dateIndex && b.source === 'booking');
+        const existingBookingsForTab = prev.filter(b => isMatch(b.arenaId) && b.dateIndex === dateIndex && (b.source === 'booking' || b.source === 'pending'));
 
-        const bookingEntries = extractedSlots.map(time => ({
-          arenaId, dateIndex, time, source: 'booking' as const
+        const bookingEntries: BookedSlot[] = extractedSlots.map(s => ({
+          arenaId,
+          dateIndex,
+          time: s.time,
+          source: s.isPending ? ('pending' as const) : ('booking' as const),
+          status: s.status
         }));
-        const overrideEntries = closedEntries.map(e => ({
+        const overrideEntries: BookedSlot[] = closedEntries.map(e => ({
           arenaId, dateIndex, time: e.time, source: 'override' as const
         }));
 
@@ -871,6 +875,221 @@ export default function WinDeclareApp() {
       fetchOwnerBookings();
     }
   }, [view, ownerTab, currentUser?.id, fetchOwnerBookings]);
+
+  // Fetch & Manage Pending Approval Bookings (Free Plan / WhatsApp Requests)
+  const [pendingApprovalBookings, setPendingApprovalBookings] = useState<any[]>([]);
+
+  const fetchPendingApprovalsFromSupabase = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*, grounds(*)')
+        .or('status.eq.whatsapp_pending,payment_status.eq.whatsapp_pending,status.eq.pending,payment_status.eq.pending')
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setPendingApprovalBookings(data);
+      }
+    } catch (err) {
+      console.error("Error fetching pending approval bookings:", err);
+    }
+  }, []);
+
+  const handleApprovePendingBooking = async (booking: any) => {
+    try {
+      // 1. Identify the primary identifier
+      const targetUuid = booking?.id || (typeof booking === 'string' || typeof booking === 'number' ? String(booking) : null);
+      const targetBookingCode = booking?.booking_id || (typeof booking === 'string' || typeof booking === 'number' ? String(booking) : null);
+
+      if (!targetUuid && !targetBookingCode) {
+        showToast('❌ Invalid booking reference');
+        return;
+      }
+
+      // 2. Prepare update payload with fallback booking_id if missing
+      const updatePayload: Record<string, any> = {
+        status: 'confirmed',
+        payment_status: 'completed'
+      };
+
+      if (!booking?.booking_id) {
+        updatePayload.booking_id = `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      }
+
+      // 3. Build query safely without mixed type casting in .or()
+      let query = supabase.from('bookings').update(updatePayload);
+
+      // Check if targetUuid is a valid UUID format (36 chars with hyphens)
+      const isUuid = typeof targetUuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUuid);
+
+      if (isUuid) {
+        query = query.eq('id', targetUuid);
+      } else if (targetBookingCode) {
+        query = query.eq('booking_id', targetBookingCode);
+      } else {
+        query = query.eq('id', targetUuid);
+      }
+
+      const { error } = await query;
+
+      if (error) {
+        console.error("Approve booking error details:", JSON.stringify(error, null, 2));
+        showToast(`❌ Failed to approve: ${error.message || 'Database error'}`);
+        return;
+      }
+
+      showToast('✅ Booking approved successfully!');
+      await fetchPendingApprovalsFromSupabase();
+      if (typeof fetchBookingsFromSupabase === 'function') {
+        await fetchBookingsFromSupabase();
+      }
+      if (selectedArena && typeof fetchSlotAvailability === 'function') {
+        await fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+      }
+    } catch (err: any) {
+      console.error("Approve booking exception:", err);
+      showToast(`❌ Error approving booking: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleRejectPendingBooking = async (booking: any) => {
+    try {
+      const targetUuid = booking?.id || (typeof booking === 'string' || typeof booking === 'number' ? String(booking) : null);
+      const targetBookingCode = booking?.booking_id || (typeof booking === 'string' || typeof booking === 'number' ? String(booking) : null);
+
+      if (!targetUuid && !targetBookingCode) {
+        showToast('❌ Invalid booking reference');
+        return;
+      }
+
+      let query = supabase.from('bookings').update({
+        status: 'rejected',
+        payment_status: 'failed'
+      });
+
+      const isUuid = typeof targetUuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUuid);
+
+      if (isUuid) {
+        query = query.eq('id', targetUuid);
+      } else if (targetBookingCode) {
+        query = query.eq('booking_id', targetBookingCode);
+      } else {
+        query = query.eq('id', targetUuid);
+      }
+
+      const { error } = await query;
+
+      if (error) {
+        console.error("Reject booking error details:", JSON.stringify(error, null, 2));
+        showToast(`❌ Failed to reject: ${error.message || 'Database error'}`);
+        return;
+      }
+
+      showToast('❌ Booking request rejected.');
+      await fetchPendingApprovalsFromSupabase();
+      if (typeof fetchBookingsFromSupabase === 'function') {
+        await fetchBookingsFromSupabase();
+      }
+      if (selectedArena && typeof fetchSlotAvailability === 'function') {
+        await fetchSlotAvailability(selectedArena.id, selectedDateIndex);
+      }
+    } catch (err: any) {
+      console.error("Reject booking exception:", err);
+      showToast(`❌ Error rejecting booking: ${err.message || 'Unknown error'}`);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingApprovalsFromSupabase();
+  }, [fetchPendingApprovalsFromSupabase, view, ownerTab, adminTab]);
+
+  const renderPendingApprovalsSection = (filterForOwner: boolean = false) => {
+    const displayList = filterForOwner && currentUser?.id
+      ? pendingApprovalBookings.filter((b: any) => {
+          const userId = String(currentUser.id || '');
+          const ownerId = b.grounds?.user_id || b.grounds?.owner_id;
+          return ownerId ? String(ownerId) === userId : true;
+        })
+      : pendingApprovalBookings;
+
+    return (
+      <div className="bg-[#0e1320] border border-amber-500/30 rounded-2xl p-4 sm:p-6 space-y-4 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+            <h3 className="font-extrabold text-base sm:text-lg text-white">Pending Approvals</h3>
+            <span className="bg-amber-500/20 text-amber-300 text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border border-amber-500/30">
+              {displayList.length}
+            </span>
+          </div>
+          <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider bg-amber-500/10 px-2 py-1 rounded">
+            Free Plan / WhatsApp Requests
+          </span>
+        </div>
+
+        {displayList.length === 0 ? (
+          <div className="bg-[#080c14] border border-dashed border-gray-800 rounded-xl p-6 text-center text-xs text-gray-400 font-mono">
+            No pending WhatsApp slot requests awaiting approval.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {displayList.map((b: any, idx: number) => {
+              const bId = b.booking_id || b.id || `WD-PENDING-${idx + 1}`;
+              const arenaTitle = b.grounds?.name || b.grounds?.title || b.arena_title || b.arenaTitle || 'Sports Turf';
+              const dateStr = b.booking_date || b.date || 'Today';
+              const slotsStr = typeof b.slots === 'string' ? b.slots : (Array.isArray(b.slots) ? b.slots.join(', ') : (b.slot_time || b.time_slot || ''));
+              const playerDetails = b.user_contact || b.userContact || b.user_email || b.user_id || 'Player Guest';
+              const priceVal = b.total_amount || b.amount || 0;
+
+              return (
+                <div key={`${bId}-${idx}`} className="bg-[#080c14] border border-amber-500/20 hover:border-amber-500/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono font-bold text-amber-400">{bId}</span>
+                      <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                        Pending Approval
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-white text-sm">{arenaTitle}</h4>
+                    <p className="text-xs text-gray-300 flex items-center gap-1.5 font-mono">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" /> {dateStr} • {slotsStr}
+                    </p>
+                    <p className="text-[11px] text-gray-400">Player: <span className="text-gray-200 font-mono">{playerDetails}</span></p>
+                  </div>
+
+                  <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-gray-800">
+                    <span className="text-lg font-black text-amber-400 font-mono">₹{priceVal}</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          console.log("Approve clicked for booking object b:", JSON.stringify(b, null, 2));
+                          handleApprovePendingBooking(b);
+                        }}
+                        className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs rounded-xl shadow-lg transition flex items-center gap-1"
+                      >
+                        <Check className="w-3.5 h-3.5 stroke-[3]" /> Approve
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          console.log("Reject clicked for booking object b:", JSON.stringify(b, null, 2));
+                          handleRejectPendingBooking(b);
+                        }}
+                        className="px-3.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-bold text-xs rounded-xl transition flex items-center gap-1"
+                      >
+                        <X className="w-3.5 h-3.5 stroke-[3]" /> Reject
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Fetch Pending Grounds from Supabase Database for Admin Verification
   const fetchPendingGroundsFromSupabase = async () => {
@@ -1795,17 +2014,21 @@ export default function WinDeclareApp() {
 
   const handleOpenEditTurfModal = (arena: Arena) => {
     setEditingTurf(arena);
-    setEditingTurfTitle(arena.title || '');
+    setEditingTurfTitle(arena.title || (arena as any).name || '');
     setEditingTurfLocation(arena.location || '');
     setEditingTurfDescription(arena.description || '');
-    setEditingTurfPrice(arena.price || 1200);
-    setEditingTurfLocationUrl(arena.locationUrl || '');
-    setEditingTurfWhatsappNumber(arena.whatsappNumber || '');
-    setEditingTurfUpiId(arena.ownerUpiId || arena.upiId || '');
-    setEditingTurfSports(arena.sports || []);
-    setEditingTurfAmenities(arena.amenities || []);
+    setEditingTurfPrice(arena.price || (arena as any).price_per_hour || 1200);
+    setEditingTurfLocationUrl(arena.locationUrl || (arena as any).location_url || '');
+    setEditingTurfWhatsappNumber(arena.whatsappNumber || (arena as any).whatsapp_number || '');
+    setEditingTurfUpiId(arena.ownerUpiId || arena.upiId || (arena as any).owner_upi_id || '');
+    setEditingTurfSports(arena.sports && arena.sports.length > 0 ? arena.sports : ((arena as any).sport_type ? (arena as any).sport_type.split(',').map((s: string) => s.trim()) : []));
+    setEditingTurfAmenities(arena.amenities || (arena as any).facilities || []);
     setEditingTurfImages(arena.images && arena.images.length > 0 ? arena.images : (arena.image ? [arena.image] : []));
     setShowEditTurfModal(true);
+  };
+
+  const handleOpenAdminEditModal = (ground: Arena) => {
+    handleOpenEditTurfModal(ground);
   };
 
   const handleUpdateVenue = async (e: React.FormEvent) => {
@@ -1827,31 +2050,48 @@ export default function WinDeclareApp() {
         ? editingTurfImages[0] 
         : (editingTurf.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop');
 
-      const updatePayload = {
-        name: editingTurfTitle,
-        location: editingTurfLocation,
-        description: editingTurfDescription?.trim() || null,
-        price_per_hour: Number(editingTurfPrice),
-        location_url: editingTurfLocationUrl,
-        sports: editingTurfSports,
-        facilities: editingTurfAmenities,
-        images: editingTurfImages,
-        whatsapp_number: editingTurfWhatsappNumber,
-        upi_id: editingTurfUpiId
+      const venueName = editingTurfTitle;
+      const pricePerHour = editingTurfPrice;
+      const whatsappNumber = editingTurfWhatsappNumber;
+      const ownerUpiId = editingTurfUpiId;
+      const locationUrl = editingTurfLocationUrl;
+      const selectedSports = editingTurfSports;
+      const selectedFacilities = editingTurfAmenities;
+      const groundDescription = editingTurfDescription;
+      const groundImages = editingTurfImages;
+      const currentEditingGroundId = editingTurf.id;
+
+      const sportsValue = Array.isArray(selectedSports) 
+        ? selectedSports 
+        : [selectedSports || 'Cricket'];
+
+      const updatePayload: Record<string, any> = {
+        name: venueName?.trim(),
+        price_per_hour: Number(pricePerHour) || 0,
+        sports: sportsValue,
+        facilities: Array.isArray(selectedFacilities) ? selectedFacilities : [],
+        updated_at: new Date().toISOString()
       };
 
-      const { error } = await supabase
+      // Only include optional fields if defined
+      if (whatsappNumber !== undefined) updatePayload.whatsapp_number = whatsappNumber?.trim() || null;
+      if (ownerUpiId !== undefined) updatePayload.owner_upi_id = ownerUpiId?.trim() || null;
+      if (locationUrl !== undefined) updatePayload.location_url = locationUrl?.trim() || null;
+      if (groundDescription !== undefined) updatePayload.description = groundDescription?.trim() || null;
+      if (groundImages !== undefined) updatePayload.images = groundImages || [];
+
+      const { data, error } = await supabase
         .from('grounds')
         .update(updatePayload)
-        .eq('id', editingTurf.id);
+        .eq('id', currentEditingGroundId);
 
       if (error) {
-        console.error('Failed to update ground in Supabase:', error);
-        showToast(`❌ Failed to update ground: ${error.message}`);
+        console.error('Update ground error details:', JSON.stringify(error, null, 2));
+        showToast(`❌ Failed to update ground: ${error?.message || error?.details || 'Check RLS permissions'}`);
         return;
       }
 
-      showToast('✓ Ground updated successfully!');
+      showToast('✅ Ground listing updated successfully!');
       setShowEditTurfModal(false);
       await fetchGroundsFromSupabase();
     } catch (err: any) {
@@ -2612,32 +2852,48 @@ export default function WinDeclareApp() {
 
                       const normalizedSlotTime = normalizeTimeString(slot.time);
                       const isSelected = selectedSlots.some(s => normalizeTimeString(s.time) === normalizedSlotTime);
-                      const isBooked = bookedSlots.some(b =>
+                      const matchEntry = bookedSlots.find(b =>
                         String(b.arenaId) === String(selectedArena.id) &&
                         b.dateIndex === selectedDateIndex &&
                         normalizeTimeString(b.time) === normalizedSlotTime
                       );
 
-                    return (
-                      <button
-                        key={slot.time}
-                        disabled={isBooked}
-                        onClick={() => toggleSlotSelection(slot)}
-                        className={`p-3 rounded-2xl border transition text-center space-y-1 ${
-                          isBooked
-                            ? 'bg-rose-950/20 border-rose-900/40 text-rose-500/70 opacity-60 cursor-not-allowed line-through'
-                            : isSelected 
-                            ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black border-[#EC4899] shadow-lg font-bold' 
-                            : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
-                        }`}
-                      >
-                        <p className="text-xs font-extrabold">{slot.time}</p>
-                        <p className={`text-[10px] font-semibold ${isBooked ? 'text-gray-600' : isSelected ? 'text-black' : 'text-gray-500'}`}>
-                          {isBooked ? 'BOOKED' : `₹${slot.price}`}
-                        </p>
-                      </button>
-                    );
-                  })}
+                      const isPending = matchEntry?.source === 'pending' || matchEntry?.status === 'pending' || matchEntry?.status === 'whatsapp_pending';
+                      const isBooked = !!matchEntry && !isPending;
+
+                      if (isPending) {
+                        return (
+                          <button
+                            key={slot.time}
+                            disabled={true}
+                            className="p-3 rounded-2xl border transition text-center space-y-1 bg-amber-500/10 border border-amber-500/40 text-amber-300 opacity-90 cursor-not-allowed flex flex-col items-center justify-center"
+                          >
+                            <p className="text-xs font-extrabold">{slot.time}</p>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full mt-1">Pending</span>
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <button
+                          key={slot.time}
+                          disabled={isBooked}
+                          onClick={() => toggleSlotSelection(slot)}
+                          className={`p-3 rounded-2xl border transition text-center space-y-1 ${
+                            isBooked
+                              ? 'bg-rose-950/20 border-rose-900/40 text-rose-500/70 opacity-60 cursor-not-allowed line-through'
+                              : isSelected 
+                              ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black border-[#EC4899] shadow-lg font-bold' 
+                              : 'bg-[#080c14] border-gray-800 text-gray-200 hover:border-gray-700'
+                          }`}
+                        >
+                          <p className="text-xs font-extrabold">{slot.time}</p>
+                          <p className={`text-[10px] font-semibold ${isBooked ? 'text-gray-600' : isSelected ? 'text-black' : 'text-gray-500'}`}>
+                            {isBooked ? 'BOOKED' : `₹${slot.price}`}
+                          </p>
+                        </button>
+                      );
+                    })}
                 </div>
               </div>
 
@@ -3012,17 +3268,30 @@ export default function WinDeclareApp() {
               <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
                 <h3 className="font-bold text-lg text-white">All Active Ground Venues</h3>
                 <div className="grid md:grid-cols-2 gap-4">
-                  {arenas.map(a => (
-                    <div key={a.id} className="bg-[#080c14] border border-gray-800 p-4 rounded-xl flex items-center justify-between">
+                  {arenas.map(ground => (
+                    <div key={ground.id} className="bg-[#080c14] border border-gray-800 p-4 rounded-xl flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <img src={a.image} alt={a.title} className="w-12 h-12 rounded-lg object-cover" />
+                        <img src={ground.image} alt={ground.title} className="w-12 h-12 rounded-lg object-cover" />
                         <div>
-                          <h4 className="font-bold text-white text-xs">{a.title}</h4>
-                          <p className="text-[10px] text-gray-400">{a.location}</p>
-                          <p className="text-[10px] font-bold text-[#EC4899] mt-0.5">₹{a.price}/hr • Plan: {a.plan}</p>
+                          <h4 className="font-bold text-white text-xs">{ground.title}</h4>
+                          <p className="text-[10px] text-gray-400">{ground.location}</p>
+                          <p className="text-[10px] font-bold text-[#EC4899] mt-0.5">₹{ground.price}/hr • Plan: {ground.plan}</p>
                         </div>
                       </div>
-                      <span className="text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/30 px-2 py-1 rounded">Active</span>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 text-xs rounded-full bg-emerald-500/20 text-emerald-400 font-medium">
+                          Active
+                        </span>
+                        <button
+                          onClick={() => handleOpenAdminEditModal(ground)}
+                          className="px-3 py-1 text-xs font-semibold rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition-colors flex items-center gap-1.5"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          Edit
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -3031,8 +3300,11 @@ export default function WinDeclareApp() {
 
             {/* TAB 5: BOOKINGS & TRANSACTIONS */}
             {adminTab === 'bookings' && (
-              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
-                <h3 className="font-bold text-lg text-white">Bookings & Transactions Ledger</h3>
+              <div className="space-y-6">
+                {renderPendingApprovalsSection(false)}
+
+                <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                  <h3 className="font-bold text-lg text-white">Bookings & Transactions Ledger</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
@@ -3060,6 +3332,7 @@ export default function WinDeclareApp() {
                   </table>
                 </div>
               </div>
+            </div>
             )}
 
             {/* TAB 6: ADMIN PAYOUT & QR SETTINGS */}
@@ -3798,6 +4071,8 @@ export default function WinDeclareApp() {
 
                   return (
                     <div className="space-y-6">
+                      {renderPendingApprovalsSection(true)}
+
                       <div>
                         <span className="text-[10px] font-bold text-[#EC4899] uppercase tracking-widest bg-pink-500/10 px-2 py-0.5 rounded border border-pink-500/20">
                           Bookings Ledger
@@ -4480,18 +4755,25 @@ export default function WinDeclareApp() {
 
                   const slotsToLock = selectedSlots.length > 0 ? selectedSlots : [{ time: slotsStr, price: totalAmount }];
 
-                  const recordsToInsert = slotsToLock.map(s => ({
-                    booking_id: `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-                    ground_id: String(selectedGround.id),
-                    user_id: currentUser?.id || '',
-                    booking_date: formattedIsoDate,
-                    slots: [s.time],
-                    total_amount: totalAmount,
-                    status: 'whatsapp_pending',
-                    payment_status: 'whatsapp_pending',
-                    booking_type: 'online',
-                    created_at: new Date().toISOString()
-                  }));
+                  const recordsToInsert = slotsToLock.map(s => {
+                    const uniqueId = `WD-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+                    return {
+                      booking_id: uniqueId,
+                      id: uniqueId,
+                      ground_id: String(selectedGround.id),
+                      user_id: currentUser?.id || '',
+                      user_contact: currentUser?.phone || currentUser?.email || 'Player Session',
+                      booking_date: formattedIsoDate,
+                      date_index: selectedDateIndex,
+                      slots: [s.time],
+                      total_amount: s.price || totalAmount,
+                      amount: s.price || totalAmount,
+                      status: 'whatsapp_pending',
+                      payment_status: 'whatsapp_pending',
+                      booking_type: 'online',
+                      created_at: new Date().toISOString()
+                    };
+                  });
 
                   try {
                     const { error } = await supabase.from('bookings').insert(recordsToInsert);
@@ -4528,10 +4810,13 @@ export default function WinDeclareApp() {
                   const newLockedSlots: BookedSlot[] = slotsToLock.map(s => ({
                     arenaId: Number(selectedGround.id),
                     dateIndex: selectedDateIndex,
-                    time: s.time
+                    time: s.time,
+                    source: 'pending',
+                    status: 'pending'
                   }));
                   setBookedSlots(prev => [...prev, ...newLockedSlots]);
                   setSelectedSlots([]);
+                  fetchPendingApprovalsFromSupabase();
 
                   window.open(waUrl, '_blank');
                   setShowPaymentModal(false);
