@@ -55,6 +55,8 @@ interface Arena {
   status?: string;
   is_verified?: boolean;
   cashfree_vendor_id?: string;
+  payment_mode?: 'advance_only' | 'both' | 'full_only' | string;
+  advance_amount?: number;
 }
 
 interface Booking {
@@ -65,12 +67,19 @@ interface Booking {
   dateIndex: number;
   slots: string;
   amount: number;
+  total_amount?: number;
+  paidAmount?: number | null;
+  paid_amount?: number | null;
+  balanceAmount?: number | null;
+  balance_amount?: number | null;
+  paymentOption?: 'advance' | 'full' | string;
+  payment_option?: 'advance' | 'full' | string;
   userContact: string;
   user_id?: string;
   planUsed: 'subscription' | 'commission' | 'hybrid' | string;
   paymentQrUsed: string;
   createdAt: string;
-  booking_type?: 'online' | 'offline';
+  booking_type?: 'online' | 'offline' | string;
   payment_status?: string;
   turf_display_name?: string;
   ground_id?: number | string;
@@ -160,6 +169,28 @@ const extractSlotTimesFromBooking = (row: any): string[] => {
   });
 
   return result;
+};
+
+const getBookingPaymentDetails = (b: any) => {
+  const total = Number(b.total_amount || b.amount) || 0;
+  const balance = b.balance_amount !== undefined && b.balance_amount !== null
+    ? Number(b.balance_amount)
+    : (b.balanceAmount !== undefined && b.balanceAmount !== null ? Number(b.balanceAmount) : 0);
+  const paid = b.paid_amount !== undefined && b.paid_amount !== null
+    ? Number(b.paid_amount)
+    : (b.paidAmount !== undefined && b.paidAmount !== null ? Number(b.paidAmount) : total);
+
+  const type = String(b.booking_type || '').toLowerCase();
+  const isAdvanceType = type.includes('token') || type.includes('advance');
+
+  if (balance > 0 || isAdvanceType) {
+    const match = type.match(/\d+/);
+    const advancePaid = match ? Number(match[0]) : paid;
+    const balanceDue = balance > 0 ? balance : Math.max(0, total - advancePaid);
+    return { isFullPaid: false, advancePaid, balanceDue, total };
+  }
+
+  return { isFullPaid: true, advancePaid: total, balanceDue: 0, total };
 };
 
 export default function WinDeclareApp() {
@@ -320,6 +351,13 @@ export default function WinDeclareApp() {
   // Ground Multi-Image Upload State
   const [newArenaImages, setNewArenaImages] = useState<string[]>([]);
   const [isUploadingGroundImages, setIsUploadingGroundImages] = useState<boolean>(false);
+
+  // Turf Payment Mode States
+  const [newArenaPaymentMode, setNewArenaPaymentMode] = useState<'advance_only' | 'both' | 'full_only'>('advance_only');
+  const [newArenaAdvanceAmount, setNewArenaAdvanceAmount] = useState<number>(100);
+  const [editingTurfPaymentMode, setEditingTurfPaymentMode] = useState<'advance_only' | 'both' | 'full_only'>('advance_only');
+  const [editingTurfAdvanceAmount, setEditingTurfAdvanceAmount] = useState<number>(100);
+  const [checkoutPaymentOption, setCheckoutPaymentOption] = useState<'advance' | 'full'>('advance');
 
   // Edit Ground Modal State
   const [showEditTurfModal, setShowEditTurfModal] = useState<boolean>(false);
@@ -660,6 +698,11 @@ export default function WinDeclareApp() {
             dateIndex: item.date_index ?? item.dateIndex ?? 0,
             slots: typeof item.slots === 'string' ? item.slots : (Array.isArray(item.slots) ? item.slots.map((s: any) => typeof s === 'string' ? s : s.time).join(', ') : ''),
             amount: Number(item.amount || item.total_amount || 0),
+            total_amount: Number(item.total_amount || item.amount || 0),
+            paid_amount: item.paid_amount !== undefined && item.paid_amount !== null ? Number(item.paid_amount) : Number(item.total_amount || item.amount || 0),
+            paidAmount: item.paid_amount !== undefined && item.paid_amount !== null ? Number(item.paid_amount) : Number(item.total_amount || item.amount || 0),
+            balance_amount: item.balance_amount !== undefined && item.balance_amount !== null ? Number(item.balance_amount) : 0,
+            balanceAmount: item.balance_amount !== undefined && item.balance_amount !== null ? Number(item.balance_amount) : 0,
             userContact: item.user_contact || item.userContact || '',
             user_id: item.user_id || item.userId || '',
             planUsed: item.plan_used || item.planUsed || 'subscription',
@@ -1057,8 +1100,31 @@ export default function WinDeclareApp() {
                     <p className="text-[11px] text-gray-400">Player: <span className="text-gray-200 font-mono">{playerDetails}</span></p>
                   </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-gray-800">
-                    <span className="text-lg font-black text-amber-400 font-mono">₹{priceVal}</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-gray-800">
+                    <div>
+                      <span className="text-lg font-black text-amber-400 font-mono block">Total: ₹{priceVal}</span>
+                      {(() => {
+                        const payDetails = getBookingPaymentDetails(b);
+                        return (
+                          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                            {payDetails.isFullPaid ? (
+                              <span className="text-[10px] font-extrabold text-[#0EA5E9] bg-[#0EA5E9]/15 border border-[#0EA5E9]/30 px-2 py-0.5 rounded">
+                                ✓ 100% Fully Paid (₹{payDetails.total})
+                              </span>
+                            ) : (
+                              <>
+                                <span className="text-[10px] font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded">
+                                  ✓ Paid: ₹{payDetails.advancePaid}
+                                </span>
+                                <span className="text-[10px] font-extrabold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                                  ⏳ Balance Due: ₹{payDetails.balanceDue}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -1118,7 +1184,9 @@ export default function WinDeclareApp() {
           ownerQrCodeUrl: item.qr_code_url || item.ownerQrCodeUrl || '',
           upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
           whatsappNumber: item.whatsapp_number || item.whatsappNumber || '',
-          status: 'pending'
+          status: 'pending',
+          payment_mode: item.payment_mode || 'advance_only',
+          advance_amount: item.advance_amount !== undefined && item.advance_amount !== null ? Number(item.advance_amount) : 100
         }));
         setPendingGrounds(mappedPending);
       }
@@ -1188,7 +1256,9 @@ export default function WinDeclareApp() {
             upiId: item.upi_id || item.owner_upi_id || item.ownerUpiId || 'owner@okaxis',
             whatsappNumber: item.whatsapp_number || item.whatsappNumber || '',
             status: item.status || 'approved',
-            is_verified: item.is_verified !== undefined && item.is_verified !== null ? Boolean(item.is_verified) : true
+            is_verified: item.is_verified !== undefined && item.is_verified !== null ? Boolean(item.is_verified) : true,
+            payment_mode: item.payment_mode || 'advance_only',
+            advance_amount: item.advance_amount !== undefined && item.advance_amount !== null ? Number(item.advance_amount) : 100
           };
         });
 
@@ -1599,15 +1669,30 @@ export default function WinDeclareApp() {
     const bookingMessage = `Hi! I would like to book ${selectedArena.title}.\n📅 Date: ${selectedDateStr}\n⏰ Slots: ${slotsStr}\n💰 Total Amount: ₹${totalAmount}\n[Free Tier Direct Booking Request]`;
     const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(bookingMessage)}`;
 
+    const fullTotal = Number(totalPrice || selectedArena?.price || 900);
+    const rawAdvance = Number(selectedArena?.advance_amount) || 100;
+    const groundPaymentMode = selectedArena?.payment_mode || 'advance_only';
+
+    const isAdvancePayment = 
+      groundPaymentMode === 'advance_only' || 
+      (groundPaymentMode === 'both' && checkoutPaymentOption === 'advance');
+
+    const actualPaid = isAdvancePayment ? Math.min(rawAdvance, fullTotal) : fullTotal;
+    const actualBalance = isAdvancePayment ? Math.max(0, fullTotal - actualPaid) : 0;
+    const bookingTypeValue = isAdvancePayment ? `online_token_${actualPaid}` : 'online';
+    const effectiveOption = isAdvancePayment ? 'advance' : 'full';
+
     const recordsToInsert = selectedSlots.map(s => ({
       ground_id: String(selectedArena.id),
       user_id: currentUser.id,
       booking_date: formattedIsoDate,
       slots: [s.time],
-      total_amount: totalAmount,
+      total_amount: fullTotal,
+      paid_amount: actualPaid,
+      balance_amount: actualBalance,
       status: 'whatsapp_pending',
       payment_status: 'whatsapp_pending',
-      booking_type: 'online',
+      booking_type: bookingTypeValue,
       created_at: new Date().toISOString()
     }));
 
@@ -1665,6 +1750,33 @@ export default function WinDeclareApp() {
     showToast("🎉 Free Plan Booking! Redirected to WhatsApp to contact owner.");
   };
 
+  const handleUpdatePaymentMode = async (groundId: string | number, newMode: 'advance_only' | 'both' | 'full_only') => {
+    const { error } = await supabase
+      .from('grounds')
+      .update({ payment_mode: newMode })
+      .eq('id', groundId);
+    if (error) {
+      showToast(`❌ Failed to update payment mode: ${error.message}`);
+      return;
+    }
+    showToast('✅ Payment mode updated!');
+    await fetchGroundsFromSupabase();
+  };
+
+  const handleUpdateAdvanceAmount = async (groundId: string | number, amount: number) => {
+    const validAmount = Math.max(10, Number(amount) || 100);
+    const { error } = await supabase
+      .from('grounds')
+      .update({ advance_amount: validAmount })
+      .eq('id', groundId);
+    if (error) {
+      showToast(`❌ Failed to update advance amount: ${error.message}`);
+      return;
+    }
+    showToast(`✅ Advance amount updated to ₹${validAmount}!`);
+    await fetchGroundsFromSupabase();
+  };
+
   const handleOnlinePayment = async () => {
     if (!selectedArena || !currentUser) return;
 
@@ -1674,6 +1786,20 @@ export default function WinDeclareApp() {
 
     const slotsStr = selectedSlots.map(s => s.time).join(', ');
     const totalAmount = totalPrice;
+
+    const fullTotal = Number(totalPrice || selectedArena?.price || 900);
+    const rawAdvance = Number(selectedArena?.advance_amount) || 100;
+    const groundPaymentMode = selectedArena?.payment_mode || 'advance_only';
+
+    const isAdvancePayment = 
+      groundPaymentMode === 'advance_only' || 
+      (groundPaymentMode === 'both' && checkoutPaymentOption === 'advance');
+
+    const actualPaid = isAdvancePayment ? Math.min(rawAdvance, fullTotal) : fullTotal;
+    const actualBalance = isAdvancePayment ? Math.max(0, fullTotal - actualPaid) : 0;
+    const bookingTypeValue = isAdvancePayment ? `online_token_${actualPaid}` : 'online';
+    const effectiveOption = isAdvancePayment ? 'advance' : 'full';
+
     const generatedBookingId = `WD-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
     const recordsToInsert = selectedSlots.map(s => ({
@@ -1682,10 +1808,12 @@ export default function WinDeclareApp() {
       user_id: currentUser.id,
       booking_date: formattedIsoDate,
       slots: [s.time],
-      total_amount: totalAmount,
+      total_amount: fullTotal,
+      paid_amount: actualPaid,
+      balance_amount: actualBalance,
       status: 'pending',
       payment_status: 'pending',
-      booking_type: 'online',
+      booking_type: bookingTypeValue,
       created_at: new Date().toISOString()
     }));
 
@@ -1710,7 +1838,7 @@ export default function WinDeclareApp() {
 
     // Invoke modular payment gateway adapter
     const paymentRes = await initiateOnlinePayment({
-      amount: totalAmount,
+      amount: onlinePayAmount,
       bookingId: generatedBookingId,
       customerName: currentUser.name || 'Player',
       customerPhone: currentUser.phone || '9999999999',
@@ -1869,6 +1997,19 @@ export default function WinDeclareApp() {
       time: s.time
     }));
 
+    const fullTotal = Number(totalPrice || selectedArena?.price || 900);
+    const rawAdvance = Number(selectedArena?.advance_amount) || 100;
+    const groundPaymentMode = selectedArena?.payment_mode || 'advance_only';
+
+    const isAdvancePayment = 
+      groundPaymentMode === 'advance_only' || 
+      (groundPaymentMode === 'both' && checkoutPaymentOption === 'advance');
+
+    const actualPaid = isAdvancePayment ? Math.min(rawAdvance, fullTotal) : fullTotal;
+    const actualBalance = isAdvancePayment ? Math.max(0, fullTotal - actualPaid) : 0;
+    const bookingTypeValue = isAdvancePayment ? `online_token_${actualPaid}` : 'online';
+    const effectiveOption = isAdvancePayment ? 'advance' : 'full';
+
     // Save Booking Record directly to Supabase `bookings` table with status: 'confirmed'
     const recordsToInsert = slotsToInsert.map(s => ({
       ground_id: selectedArena.id,
@@ -1881,12 +2022,15 @@ export default function WinDeclareApp() {
       date: newBooking.date,
       date_index: selectedDateIndex,
       slots: newBooking.slots,
-      amount: newBooking.amount,
-      total_amount: newBooking.amount,
+      amount: fullTotal,
+      total_amount: fullTotal,
+      paid_amount: actualPaid,
+      balance_amount: actualBalance,
       user_contact: newBooking.userContact,
       plan_used: newBooking.planUsed,
       payment_qr_used: newBooking.paymentQrUsed,
       payment_status: 'completed',
+      booking_type: bookingTypeValue,
       created_at: newBooking.createdAt
     }));
 
@@ -2024,6 +2168,8 @@ export default function WinDeclareApp() {
     setEditingTurfSports(arena.sports && arena.sports.length > 0 ? arena.sports : ((arena as any).sport_type ? (arena as any).sport_type.split(',').map((s: string) => s.trim()) : []));
     setEditingTurfAmenities(arena.amenities || (arena as any).facilities || []);
     setEditingTurfImages(arena.images && arena.images.length > 0 ? arena.images : (arena.image ? [arena.image] : []));
+    setEditingTurfPaymentMode((arena.payment_mode as any) || 'advance_only');
+    setEditingTurfAdvanceAmount(arena.advance_amount ? Number(arena.advance_amount) : 100);
     setShowEditTurfModal(true);
   };
 
@@ -2070,6 +2216,8 @@ export default function WinDeclareApp() {
         price_per_hour: Number(pricePerHour) || 0,
         sports: sportsValue,
         facilities: Array.isArray(selectedFacilities) ? selectedFacilities : [],
+        payment_mode: editingTurfPaymentMode,
+        advance_amount: Math.max(10, Number(editingTurfAdvanceAmount) || 100),
         updated_at: new Date().toISOString()
       };
 
@@ -2214,6 +2362,8 @@ export default function WinDeclareApp() {
           sports: Array.isArray(newTurf.sports) ? newTurf.sports : [],
           facilities: Array.isArray(newTurf.facilities) ? newTurf.facilities : [],
           images: newArenaImages,
+          payment_mode: newArenaPaymentMode || 'advance_only',
+          advance_amount: Math.max(10, Number(newArenaAdvanceAmount) || 100),
           status: 'pending',
           user_id: currentOwnerId,
           owner_id: currentOwnerId,
@@ -3562,6 +3712,8 @@ export default function WinDeclareApp() {
                                     booking_date: targetDateStr,
                                     slots: selectedTimeStrings,
                                     total_amount: offlineBooking.amount,
+                                    paid_amount: offlineBooking.amount,
+                                    balance_amount: 0,
                                     booking_type: 'offline',
                                     payment_status: 'offline_cash',
                                     status: 'booked',
@@ -3777,6 +3929,80 @@ export default function WinDeclareApp() {
                                     <p className="text-[10px] text-gray-500 mt-1">Online Payment Gateway</p>
                                   </button>
                                 </div>
+                              </div>
+
+                              {/* 3-WAY TURF PAYMENT MODE SELECTOR FOR NEW TURF */}
+                              <div className="space-y-2">
+                                <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
+                                  Turf Payment Mode (Required) *
+                                </label>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewArenaPaymentMode('advance_only')}
+                                    className={`p-3.5 rounded-xl border text-left transition ${
+                                      newArenaPaymentMode === 'advance_only'
+                                        ? 'bg-pink-500/15 border-[#EC4899] text-white font-bold shadow-md'
+                                        : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-black">Advance Only (₹100)</span>
+                                      {newArenaPaymentMode === 'advance_only' && <Check className="w-3.5 h-3.5 text-[#EC4899]" />}
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 mt-1">Charge ₹100 online to reserve. Balance collected at venue</p>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewArenaPaymentMode('both')}
+                                    className={`p-3.5 rounded-xl border text-left transition ${
+                                      newArenaPaymentMode === 'both'
+                                        ? 'bg-[#0EA5E9]/15 border-[#0EA5E9] text-white font-bold shadow-md'
+                                        : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-black">Allow Both</span>
+                                      {newArenaPaymentMode === 'both' && <Check className="w-3.5 h-3.5 text-[#0EA5E9]" />}
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 mt-1">Player chooses full payment or ₹100 advance</p>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setNewArenaPaymentMode('full_only')}
+                                    className={`p-3.5 rounded-xl border text-left transition ${
+                                      newArenaPaymentMode === 'full_only'
+                                        ? 'bg-purple-500/15 border-purple-500 text-white font-bold shadow-md'
+                                        : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-xs font-black">Full Payment Only</span>
+                                      {newArenaPaymentMode === 'full_only' && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 mt-1">100% online payment via PayU</p>
+                                  </button>
+                                </div>
+
+                                {(newArenaPaymentMode === 'advance_only' || newArenaPaymentMode === 'both') && (
+                                  <div className="bg-[#080c14] border border-pink-500/30 rounded-xl p-4 space-y-1.5 mt-3 animate-in fade-in duration-200">
+                                    <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
+                                      Advance Booking Token Amount (₹) *
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min={10}
+                                      value={newArenaAdvanceAmount}
+                                      onChange={(e) => setNewArenaAdvanceAmount(Math.max(10, Number(e.target.value)))}
+                                      className="w-full bg-[#0e1320] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono"
+                                    />
+                                    <p className="text-[10px] text-gray-400">
+                                      The exact amount charged online via PayU to hold the slot. The remaining balance is collected at the venue.
+                                    </p>
+                                  </div>
+                                )}
                               </div>
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4041,7 +4267,7 @@ export default function WinDeclareApp() {
                                   </div>
                                 </div>
 
-                                {/* READ-ONLY LOCKED PLAN TYPE DISPLAY (Requirement 2) */}
+                                {/* READ-ONLY LOCKED PLAN TYPE DISPLAY */}
                                 <div className="bg-[#080c14] border border-gray-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                   <div className="space-y-0.5">
                                     <div className="flex items-center gap-2">
@@ -4055,6 +4281,88 @@ export default function WinDeclareApp() {
                                     <p className="text-[11px] font-semibold text-gray-300">{pLabel}</p>
                                   </div>
                                   <p className="text-[10px] text-gray-500 italic">Contact platform admin to modify your listing plan.</p>
+                                </div>
+
+                                {/* TURF PAYMENT MODE SWITCHER ON GROUND CARD */}
+                                <div className="bg-[#080c14] border border-pink-500/20 rounded-xl p-3.5 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-bold text-[#EC4899] uppercase tracking-wider flex items-center gap-1.5">
+                                      <CreditCard className="w-3.5 h-3.5" /> Turf Payment Mode
+                                    </span>
+                                    <span className="text-[10px] font-bold text-gray-400 bg-gray-900 px-2 py-0.5 rounded border border-gray-800">
+                                      Active: {(arena.payment_mode || 'advance_only').replace('_', ' ').toUpperCase()}
+                                    </span>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdatePaymentMode(arena.id, 'advance_only')}
+                                      className={`p-2.5 rounded-lg border text-left transition ${
+                                        (arena.payment_mode || 'advance_only') === 'advance_only'
+                                          ? 'bg-pink-500/20 border-[#EC4899] text-white font-bold'
+                                          : 'bg-[#0e1320] border-gray-800 text-gray-400 hover:text-gray-200'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold">Advance Only (₹100)</span>
+                                        {(arena.payment_mode || 'advance_only') === 'advance_only' && <Check className="w-3 h-3 text-[#EC4899]" />}
+                                      </div>
+                                      <p className="text-[9px] text-gray-400 mt-0.5">Charge ₹100 online. Balance at venue</p>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdatePaymentMode(arena.id, 'both')}
+                                      className={`p-2.5 rounded-lg border text-left transition ${
+                                        arena.payment_mode === 'both'
+                                          ? 'bg-[#0EA5E9]/20 border-[#0EA5E9] text-white font-bold'
+                                          : 'bg-[#0e1320] border-gray-800 text-gray-400 hover:text-gray-200'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold">Allow Both</span>
+                                        {arena.payment_mode === 'both' && <Check className="w-3 h-3 text-[#0EA5E9]" />}
+                                      </div>
+                                      <p className="text-[9px] text-gray-400 mt-0.5">Player chooses full or ₹100 advance</p>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdatePaymentMode(arena.id, 'full_only')}
+                                      className={`p-2.5 rounded-lg border text-left transition ${
+                                        arena.payment_mode === 'full_only'
+                                          ? 'bg-purple-500/20 border-purple-500 text-white font-bold'
+                                          : 'bg-[#0e1320] border-gray-800 text-gray-400 hover:text-gray-200'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-bold">Full Payment Only</span>
+                                        {arena.payment_mode === 'full_only' && <Check className="w-3 h-3 text-purple-400" />}
+                                      </div>
+                                      <p className="text-[9px] text-gray-400 mt-0.5">100% online payment via PayU</p>
+                                    </button>
+                                  </div>
+
+                                  {(arena.payment_mode === 'advance_only' || arena.payment_mode === 'both' || !arena.payment_mode) && (
+                                    <div className="pt-2 border-t border-gray-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-2">
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-[#EC4899] uppercase">
+                                          Advance Booking Token Amount (₹)
+                                        </label>
+                                        <p className="text-[9px] text-gray-400">The exact amount charged online via PayU to hold the slot. The remaining balance is collected at the venue.</p>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <input
+                                          type="number"
+                                          min={10}
+                                          defaultValue={arena.advance_amount || 100}
+                                          onBlur={(e) => handleUpdateAdvanceAmount(arena.id, Number(e.target.value))}
+                                          className="w-24 bg-[#0e1320] border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono"
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -4119,9 +4427,27 @@ export default function WinDeclareApp() {
 
                               <div className="sm:text-right space-y-1">
                                 <span className="text-xl font-black text-[#EC4899] block font-mono">₹{amountVal}</span>
-                                <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
-                                  ✓ {b.payment_status === 'offline_cash' ? 'Offline Cash Collected' : 'Payment Collected'}
-                                </span>
+                                {(() => {
+                                  const payDetails = getBookingPaymentDetails(b);
+                                  return (
+                                    <div className="flex flex-wrap items-center gap-1.5 justify-end">
+                                      {payDetails.isFullPaid ? (
+                                        <span className="inline-block bg-[#0EA5E9]/20 text-[#0EA5E9] border border-[#0EA5E9]/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                                          ✓ 100% Paid (₹{payDetails.total})
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <span className="inline-block bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                                            ✓ Paid: ₹{payDetails.advancePaid}
+                                          </span>
+                                          <span className="inline-block bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
+                                            ⏳ Balance Due: ₹{payDetails.balanceDue}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           );
@@ -4411,15 +4737,19 @@ export default function WinDeclareApp() {
                   ) : (
                     <div className="space-y-4">
                       {playerBookings.map((b) => (
-                        <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex items-center justify-between">
+                        <div key={b.id} className="bg-[#080c14] border border-gray-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <h4 className="font-bold text-white text-sm">
                                 {b.turf_display_name || b.arenaTitle || 'Sports Turf'}
                               </h4>
-                              {b.booking_type === 'offline' && (
+                              {b.booking_type === 'offline' ? (
                                 <span className="bg-purple-500/20 text-purple-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
                                   Offline
+                                </span>
+                              ) : (
+                                <span className="bg-sky-500/20 text-sky-300 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                  Digital Pass
                                 </span>
                               )}
                             </div>
@@ -4427,10 +4757,33 @@ export default function WinDeclareApp() {
                               ID: #{b.id.length > 8 ? b.id.substring(0, 8).toUpperCase() : b.id}
                             </p>
                             <p className="text-[10px] text-gray-400">{b.date} • {b.slots}</p>
+
+                            {/* DIGITAL PASS PAYMENT BREAKDOWN */}
+                            {(() => {
+                              const payDetails = getBookingPaymentDetails(b);
+                              return (
+                                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                  {payDetails.isFullPaid ? (
+                                    <span className="bg-[#0EA5E9]/15 text-[#0EA5E9] border border-[#0EA5E9]/30 text-[9px] font-extrabold px-2 py-0.5 rounded">
+                                      ✓ 100% Fully Paid (₹{payDetails.total})
+                                    </span>
+                                  ) : (
+                                    <>
+                                      <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[9px] font-extrabold px-2 py-0.5 rounded">
+                                        ✓ Advance Paid: ₹{payDetails.advancePaid}
+                                      </span>
+                                      <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[9px] font-extrabold px-2 py-0.5 rounded">
+                                        ⏳ Balance at Venue: ₹{payDetails.balanceDue}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
 
-                          <div className="text-right space-y-1.5">
-                            <span className="text-sm font-bold text-white font-mono block">₹{b.amount}</span>
+                          <div className="text-right space-y-1.5 self-end sm:self-auto">
+                            <span className="text-sm font-bold text-white font-mono block">Total: ₹{b.amount}</span>
                             <div className="flex items-center gap-2 justify-end">
                               <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">✓ Confirmed</span>
                               {userReviewedBookingIds.includes(String(b.id)) ? (
@@ -4755,8 +5108,25 @@ export default function WinDeclareApp() {
 
                   const slotsToLock = selectedSlots.length > 0 ? selectedSlots : [{ time: slotsStr, price: totalAmount }];
 
+                  const fullTotal = Number(totalAmount || selectedGround?.price || 900);
+                  const rawAdvance = Number(selectedGround?.advance_amount) || 100;
+                  const groundPaymentMode = selectedGround?.payment_mode || 'advance_only';
+
+                  const isAdvancePayment = 
+                    groundPaymentMode === 'advance_only' || 
+                    (groundPaymentMode === 'both' && checkoutPaymentOption === 'advance');
+
+                  const actualPaid = isAdvancePayment ? Math.min(rawAdvance, fullTotal) : fullTotal;
+                  const actualBalance = isAdvancePayment ? Math.max(0, fullTotal - actualPaid) : 0;
+                  const bookingTypeValue = isAdvancePayment ? `online_token_${actualPaid}` : 'online';
+                  const effectiveOption = isAdvancePayment ? 'advance' : 'full';
+
                   const recordsToInsert = slotsToLock.map(s => {
                     const uniqueId = `WD-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+                    const slotPrice = s.price || fullTotal;
+                    const itemPaid = isAdvancePayment ? Math.min(rawAdvance, slotPrice) : slotPrice;
+                    const itemBalance = Math.max(0, slotPrice - itemPaid);
+
                     return {
                       booking_id: uniqueId,
                       id: uniqueId,
@@ -4766,11 +5136,13 @@ export default function WinDeclareApp() {
                       booking_date: formattedIsoDate,
                       date_index: selectedDateIndex,
                       slots: [s.time],
-                      total_amount: s.price || totalAmount,
-                      amount: s.price || totalAmount,
+                      total_amount: slotPrice,
+                      amount: slotPrice,
+                      paid_amount: itemPaid,
+                      balance_amount: itemBalance,
                       status: 'whatsapp_pending',
                       payment_status: 'whatsapp_pending',
-                      booking_type: 'online',
+                      booking_type: bookingTypeValue,
                       created_at: new Date().toISOString()
                     };
                   });
@@ -4931,45 +5303,132 @@ export default function WinDeclareApp() {
         </div>
       )}
 
-      {/* CANCELLATION POLICY NOTICE MODAL (BOOKMYSHOW STYLE) */}
-      {showRefundNoticeModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#161b22] border border-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-[#EC4899] shrink-0">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-lg font-extrabold text-white">Cancellation Policy Notice</h3>
-                <p className="text-xs text-[#EC4899] font-medium">Please review before proceeding</p>
-              </div>
-            </div>
+      {/* CANCELLATION POLICY NOTICE & DYNAMIC PAYMENT MODE CHECKOUT MODAL */}
+      {showRefundNoticeModal && selectedArena && (() => {
+        const pMode = selectedArena.payment_mode || 'advance_only';
+        const advanceTokenAmount = selectedArena.advance_amount ? Number(selectedArena.advance_amount) : 100;
+        const effectiveOption = pMode === 'full_only' ? 'full' : (pMode === 'advance_only' ? 'advance' : checkoutPaymentOption);
+        const onlinePay = effectiveOption === 'full' ? totalPrice : Math.min(advanceTokenAmount, totalPrice);
+        const balancePay = Math.max(0, totalPrice - onlinePay);
 
-            <div className="bg-[#080c14] border border-gray-800 rounded-xl p-4 mb-6">
-              <p className="text-xs text-gray-300 leading-relaxed">
-                Bookings for this venue are <strong className="text-[#EC4899]">NON-REFUNDABLE</strong> once confirmed unless specified otherwise by the venue owner. Are you sure you want to proceed?
-              </p>
-            </div>
+        return (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-[#161b22] border border-pink-500/30 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in fade-in zoom-in duration-200">
+              <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-[#EC4899] shrink-0">
+                    <CreditCard className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Player Checkout</h3>
+                    <p className="text-xs text-[#EC4899] font-medium">{selectedArena.title}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowRefundNoticeModal(false)} className="text-gray-400 hover:text-white p-1">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setShowRefundNoticeModal(false)}
-                className="flex-1 py-3 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 font-bold text-xs rounded-xl transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmRefundNoticeAndPay}
-                className="flex-1 py-3 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/20"
-              >
-                Proceed to Pay
-              </button>
+              {/* DYNAMIC PAYMENT MODE SELECTION */}
+              <div className="bg-[#080c14] border border-gray-800 rounded-xl p-4 space-y-3">
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Payment Options</p>
+                
+                {pMode === 'advance_only' && (
+                  <div className="p-3 rounded-xl bg-pink-500/10 border border-pink-500/30 text-xs">
+                    <p className="font-extrabold text-white">Advance Only (₹{advanceTokenAmount})</p>
+                    <p className="text-[11px] text-gray-300 mt-0.5">Charge ₹{advanceTokenAmount} online to reserve. Balance collected at venue.</p>
+                  </div>
+                )}
+
+                {pMode === 'full_only' && (
+                  <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/30 text-xs">
+                    <p className="font-extrabold text-white">Full Payment Only (100% Online)</p>
+                    <p className="text-[11px] text-gray-300 mt-0.5">100% online payment via PayU. ₹0 due at venue.</p>
+                  </div>
+                )}
+
+                {pMode === 'both' && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-300 font-semibold">Select your payment method:</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCheckoutPaymentOption('advance')}
+                        className={`p-3 rounded-xl border text-left transition ${
+                          checkoutPaymentOption === 'advance'
+                            ? 'bg-pink-500/15 border-[#EC4899] text-white font-bold shadow-md'
+                            : 'bg-[#0e1320] border-gray-800 text-gray-400 hover:text-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black">Advance (₹{advanceTokenAmount})</span>
+                          {checkoutPaymentOption === 'advance' && <Check className="w-3.5 h-3.5 text-[#EC4899]" />}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">Pay ₹{advanceTokenAmount} online now</p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setCheckoutPaymentOption('full')}
+                        className={`p-3 rounded-xl border text-left transition ${
+                          checkoutPaymentOption === 'full'
+                            ? 'bg-[#0EA5E9]/15 border-[#0EA5E9] text-white font-bold shadow-md'
+                            : 'bg-[#0e1320] border-gray-800 text-gray-400 hover:text-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black">Full Payment</span>
+                          {checkoutPaymentOption === 'full' && <Check className="w-3.5 h-3.5 text-[#0EA5E9]" />}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1">Pay 100% (₹{totalPrice})</p>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* PRICE BREAKDOWN */}
+                <div className="pt-2 border-t border-gray-800/80 space-y-1 text-xs">
+                  <div className="flex justify-between text-gray-400">
+                    <span>Total Booking Amount:</span>
+                    <span className="font-mono text-white font-bold">₹{totalPrice}</span>
+                  </div>
+                  <div className="flex justify-between text-[#EC4899] font-bold">
+                    <span>Pay Online Now (PayU):</span>
+                    <span className="font-mono text-base">₹{onlinePay}</span>
+                  </div>
+                  <div className="flex justify-between text-amber-400 text-[11px] font-semibold">
+                    <span>Pay at Venue Later:</span>
+                    <span className="font-mono">₹{balancePay}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-[#080c14] border border-gray-800 rounded-xl p-3">
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  Notice: Bookings for this venue are <strong className="text-[#EC4899]">NON-REFUNDABLE</strong> once confirmed.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowRefundNoticeModal(false)}
+                  className="flex-1 py-3 bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-300 font-bold text-xs rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmRefundNoticeAndPay}
+                  className="flex-1 py-3 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/20 flex items-center justify-center gap-1.5"
+                >
+                  Proceed to Pay ₹{onlinePay}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* EDIT GROUND ARENA MODAL */}
       {showEditTurfModal && editingTurf && (
@@ -5068,6 +5527,80 @@ export default function WinDeclareApp() {
                   placeholder="https://maps.google.com/?q=..." 
                   className="w-full bg-[#080c14] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-teal-500 font-mono" 
                 />
+              </div>
+
+              {/* 3-WAY TURF PAYMENT MODE SELECTOR IN EDIT MODAL */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
+                  Turf Payment Mode (Required) *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditingTurfPaymentMode('advance_only')}
+                    className={`p-3.5 rounded-xl border text-left transition ${
+                      editingTurfPaymentMode === 'advance_only'
+                        ? 'bg-pink-500/15 border-[#EC4899] text-white font-bold shadow-md'
+                        : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black">Advance Only (₹100)</span>
+                      {editingTurfPaymentMode === 'advance_only' && <Check className="w-3.5 h-3.5 text-[#EC4899]" />}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">Charge ₹100 online to reserve. Balance collected at venue</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditingTurfPaymentMode('both')}
+                    className={`p-3.5 rounded-xl border text-left transition ${
+                      editingTurfPaymentMode === 'both'
+                        ? 'bg-[#0EA5E9]/15 border-[#0EA5E9] text-white font-bold shadow-md'
+                        : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black">Allow Both</span>
+                      {editingTurfPaymentMode === 'both' && <Check className="w-3.5 h-3.5 text-[#0EA5E9]" />}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">Player chooses full payment or ₹100 advance</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEditingTurfPaymentMode('full_only')}
+                    className={`p-3.5 rounded-xl border text-left transition ${
+                      editingTurfPaymentMode === 'full_only'
+                        ? 'bg-purple-500/15 border-purple-500 text-white font-bold shadow-md'
+                        : 'bg-[#080c14] border-gray-800 text-gray-400 hover:border-gray-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black">Full Payment Only</span>
+                      {editingTurfPaymentMode === 'full_only' && <Check className="w-3.5 h-3.5 text-purple-400" />}
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1">100% online payment via PayU</p>
+                  </button>
+                </div>
+
+                {(editingTurfPaymentMode === 'advance_only' || editingTurfPaymentMode === 'both') && (
+                  <div className="bg-[#080c14] border border-pink-500/30 rounded-xl p-4 space-y-1.5 mt-3 animate-in fade-in duration-200">
+                    <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
+                      Advance Booking Token Amount (₹) *
+                    </label>
+                    <input
+                      type="number"
+                      min={10}
+                      value={editingTurfAdvanceAmount}
+                      onChange={(e) => setEditingTurfAdvanceAmount(Math.max(10, Number(e.target.value)))}
+                      className="w-full bg-[#0e1320] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono"
+                    />
+                    <p className="text-[10px] text-gray-400">
+                      The exact amount charged online via PayU to hold the slot. The remaining balance is collected at the venue.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* SPORTS SELECTION CHIPS */}
