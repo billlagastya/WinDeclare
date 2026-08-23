@@ -1837,6 +1837,8 @@ export default function WinDeclareApp() {
     }
 
     // Invoke modular payment gateway adapter
+    const onlinePayAmount = isAdvancePayment ? Math.min(rawAdvance, fullTotal) : fullTotal;
+
     const paymentRes = await initiateOnlinePayment({
       amount: onlinePayAmount,
       bookingId: generatedBookingId,
@@ -3906,7 +3908,7 @@ export default function WinDeclareApp() {
                                       <p className="text-xs font-black text-white">Hybrid Plan</p>
                                       {newArenaPlanType === 'hybrid' && <Check className="w-3.5 h-3.5 text-teal-400" />}
                                     </div>
-                                    <p className="text-[11px] font-extrabold text-teal-400 mt-1">3% Comm + ₹2,000/mo</p>
+                                    <p className="text-[11px] font-extrabold text-teal-400 mt-1">3% Comm • ₹0/mo</p>
                                     <p className="text-[10px] text-gray-500 mt-1">Online Payment Gateway</p>
                                   </button>
 
@@ -4216,7 +4218,7 @@ export default function WinDeclareApp() {
                             const pLabel = pType === 'free'
                               ? 'Free Plan (0% Comm, ₹0/mo • WhatsApp Direct)'
                               : pType === 'hybrid'
-                              ? 'Hybrid Plan (3% Comm + ₹2,000/mo • Payment Gateway)'
+                              ? 'Hybrid Plan (3% Comm • ₹0/mo • Payment Gateway)'
                               : 'Commission Plan (10% Comm, ₹0/mo • Payment Gateway)';
                             const pBadgeClass = pType === 'free'
                               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
