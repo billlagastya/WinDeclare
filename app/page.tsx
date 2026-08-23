@@ -1047,13 +1047,26 @@ export default function WinDeclareApp() {
   }, [fetchPendingApprovalsFromSupabase, view, ownerTab, adminTab]);
 
   const renderPendingApprovalsSection = (filterForOwner: boolean = false) => {
-    const displayList = filterForOwner && currentUser?.id
+    const rawList = filterForOwner && currentUser?.id
       ? pendingApprovalBookings.filter((b: any) => {
           const userId = String(currentUser.id || '');
           const ownerId = b.grounds?.user_id || b.grounds?.owner_id;
           return ownerId ? String(ownerId) === userId : true;
         })
       : pendingApprovalBookings;
+
+    const displayList = rawList.filter((b: any) => {
+      // Only include if it is explicitly a manual WhatsApp request AND not completed
+      const isWhatsAppPending = b.status === 'whatsapp_pending' || b.payment_status === 'whatsapp_pending';
+      const isUnpaidPending = b.status === 'pending' && b.payment_status !== 'completed';
+      const isFreePlan = b.plan_used === 'free' || b.booking_type === 'whatsapp' || b.grounds?.plan_type === 'free';
+
+      return (isWhatsAppPending || isUnpaidPending) && isFreePlan;
+    });
+
+    if (!displayList || displayList.length === 0) {
+      return null;
+    }
 
     return (
       <div className="bg-[#0e1320] border border-amber-500/30 rounded-2xl p-4 sm:p-6 space-y-4 shadow-2xl">
@@ -1070,12 +1083,7 @@ export default function WinDeclareApp() {
           </span>
         </div>
 
-        {displayList.length === 0 ? (
-          <div className="bg-[#080c14] border border-dashed border-gray-800 rounded-xl p-6 text-center text-xs text-gray-400 font-mono">
-            No pending WhatsApp slot requests awaiting approval.
-          </div>
-        ) : (
-          <div className="space-y-3">
+        <div className="space-y-3">
             {displayList.map((b: any, idx: number) => {
               const bId = b.booking_id || b.id || `WD-PENDING-${idx + 1}`;
               const arenaTitle = b.grounds?.name || b.grounds?.title || b.arena_title || b.arenaTitle || 'Sports Turf';
@@ -1152,7 +1160,6 @@ export default function WinDeclareApp() {
               );
             })}
           </div>
-        )}
       </div>
     );
   };
@@ -1764,7 +1771,7 @@ export default function WinDeclareApp() {
   };
 
   const handleUpdateAdvanceAmount = async (groundId: string | number, amount: number) => {
-    const validAmount = Math.max(10, Number(amount) || 100);
+    const validAmount = Math.max(1, Number(amount) || 1);
     const { error } = await supabase
       .from('grounds')
       .update({ advance_amount: validAmount })
@@ -1849,6 +1856,20 @@ export default function WinDeclareApp() {
       bookingDate: formattedIsoDate,
       slots: selectedSlots.map(s => s.time)
     });
+
+    if (paymentRes && paymentRes.success) {
+      try {
+        await supabase
+          .from('bookings')
+          .update({
+            status: 'confirmed',
+            payment_status: 'completed'
+          })
+          .eq('booking_id', generatedBookingId);
+      } catch (updErr) {
+        console.error("Error confirming booking on payment success:", updErr);
+      }
+    }
 
     if (paymentRes && !paymentRes.success && paymentRes.error) {
       showToast(`❌ Payment Notice: ${paymentRes.error}`);
@@ -2219,7 +2240,7 @@ export default function WinDeclareApp() {
         sports: sportsValue,
         facilities: Array.isArray(selectedFacilities) ? selectedFacilities : [],
         payment_mode: editingTurfPaymentMode,
-        advance_amount: Math.max(10, Number(editingTurfAdvanceAmount) || 100),
+        advance_amount: Math.max(1, Number(editingTurfAdvanceAmount) || 1),
         updated_at: new Date().toISOString()
       };
 
@@ -2365,7 +2386,7 @@ export default function WinDeclareApp() {
           facilities: Array.isArray(newTurf.facilities) ? newTurf.facilities : [],
           images: newArenaImages,
           payment_mode: newArenaPaymentMode || 'advance_only',
-          advance_amount: Math.max(10, Number(newArenaAdvanceAmount) || 100),
+          advance_amount: Math.max(1, Number(newArenaAdvanceAmount) || 1),
           status: 'pending',
           user_id: currentOwnerId,
           owner_id: currentOwnerId,
@@ -3995,9 +4016,9 @@ export default function WinDeclareApp() {
                                     </label>
                                     <input
                                       type="number"
-                                      min={10}
+                                      min={1}
                                       value={newArenaAdvanceAmount}
-                                      onChange={(e) => setNewArenaAdvanceAmount(Math.max(10, Number(e.target.value)))}
+                                      onChange={(e) => setNewArenaAdvanceAmount(Math.max(1, Number(e.target.value)))}
                                       className="w-full bg-[#0e1320] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono"
                                     />
                                     <p className="text-[10px] text-gray-400">
@@ -4357,7 +4378,7 @@ export default function WinDeclareApp() {
                                       <div className="flex items-center gap-2 shrink-0">
                                         <input
                                           type="number"
-                                          min={10}
+                                          min={1}
                                           defaultValue={arena.advance_amount || 100}
                                           onBlur={(e) => handleUpdateAdvanceAmount(arena.id, Number(e.target.value))}
                                           className="w-24 bg-[#0e1320] border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono"
@@ -5593,9 +5614,9 @@ export default function WinDeclareApp() {
                     </label>
                     <input
                       type="number"
-                      min={10}
+                      min={1}
                       value={editingTurfAdvanceAmount}
-                      onChange={(e) => setEditingTurfAdvanceAmount(Math.max(10, Number(e.target.value)))}
+                      onChange={(e) => setEditingTurfAdvanceAmount(Math.max(1, Number(e.target.value)))}
                       className="w-full bg-[#0e1320] border border-gray-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#EC4899] font-mono"
                     />
                     <p className="text-[10px] text-gray-400">
