@@ -6,9 +6,12 @@ export const metadata: Metadata = {
   title: "WinDeclare | Premium Sports Turf & Arena Booking",
   description: "Book premium sports turfs, cricket grounds, football boxes, and badminton courts instantly. Transparent pricing, real-time slot availability, and zero hidden fees.",
   icons: {
-    icon: '/favicon.png?v=3',
-    shortcut: '/favicon.png?v=3',
-    apple: '/favicon.png?v=3',
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/icon-48.png', sizes: '48x48', type: 'image/png' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png' }],
   },
 };
 
