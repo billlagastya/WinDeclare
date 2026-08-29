@@ -31,6 +31,7 @@ interface Arena {
   latitude?: number;
   longitude?: number;
   calculatedDistance?: string | null;
+  rawDistance?: number | null;
   price: number;
   price_per_hour?: number;
   pricing_rules?: any;
@@ -57,6 +58,7 @@ interface Arena {
   cashfree_vendor_id?: string;
   payment_mode?: 'advance_only' | 'both' | 'full_only' | string;
   advance_amount?: number;
+  operational_status?: 'active' | 'closed' | 'hidden' | string;
 }
 
 interface Booking {
@@ -193,6 +195,18 @@ const getBookingPaymentDetails = (b: any) => {
   return { isFullPaid: true, advancePaid: total, balanceDue: 0, total };
 };
 
+const toTitleCase = (str: string) => {
+  return str
+    .trim()
+    .split(/\s+/)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(' ');
+};
+
+const normalizeSportKey = (name: string) => {
+  return name.trim().toLowerCase().replace(/s+$/, '');
+};
+
 export default function WinDeclareApp() {
   const [view, setView] = useState<'browse' | 'arena-details' | 'profile' | 'owner-portal' | 'admin-dashboard'>('browse');
   const [ownerTab, setOwnerTab] = useState<'calendar' | 'listings' | 'earnings' | 'bookings' | 'pricing' | 'account'>('calendar');
@@ -208,7 +222,8 @@ export default function WinDeclareApp() {
 
   // Search & Filters
   const [selectedSport, setSelectedSport] = useState<string>('All');
-  const [maxPrice, setMaxPrice] = useState<number>(2800);
+  const [isNearbyActive, setIsNearbyActive] = useState<boolean>(false);
+  const [isTopRatedActive, setIsTopRatedActive] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Player's Live Geolocation Coordinates
@@ -300,6 +315,8 @@ export default function WinDeclareApp() {
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
   const [adminTab, setAdminTab] = useState<'pending-turfs' | 'owners-subscription' | 'owners-commission' | 'players' | 'turfs' | 'bookings' | 'settings'>('pending-turfs');
   const [pendingGrounds, setPendingGrounds] = useState<Arena[]>([]);
+  const [selectedAdminGroundId, setSelectedAdminGroundId] = useState<string | number | null>(null);
+  const [expandedAdminDateRow, setExpandedAdminDateRow] = useState<string | null>(null);
   
   // Platform Admin Payout Settings
   const [adminUpiId, setAdminUpiId] = useState<string>('windeclare.admin@okaxis');
@@ -328,7 +345,12 @@ export default function WinDeclareApp() {
   const [editingBasePrice, setEditingBasePrice] = useState<number | null>(null);
 
   // Options for Sports and Facilities chips
-  const AVAILABLE_SPORTS = ['Football', 'Cricket', 'Basketball', 'Tennis', 'Badminton', 'Volleyball'];
+  const DEFAULT_SPORTS = ['Cricket', 'Snookers', 'Swimming', 'Tennis', 'Football', 'Basketball', 'Badminton', 'Volleyball'];
+  const [availableSportsList, setAvailableSportsList] = useState<string[]>(DEFAULT_SPORTS);
+  const [showAddSportInput, setShowAddSportInput] = useState<boolean>(false);
+  const [newSportInput, setNewSportInput] = useState<string>('');
+  const [showEditAddSportInput, setShowEditAddSportInput] = useState<boolean>(false);
+  const [newEditSportInput, setNewEditSportInput] = useState<string>('');
   const AVAILABLE_FACILITIES = ['Toilet', 'Parking', 'Drinking Water', 'Cafe', 'Floodlights', 'Changing Rooms'];
 
   // Form selections for new venue
@@ -389,74 +411,8 @@ export default function WinDeclareApp() {
   };
 
   // Arenas List with Pricing Plans & Owner Payment details
-  const [arenas, setArenas] = useState<Arena[]>([
-    {
-      id: '162d8c3d-bfc2-40f8-a5d6-de881096cc78',
-      title: 'Akshay Box Turf',
-      location: 'Addagutta, Secunderabad',
-      lat: 17.4399,
-      lng: 78.5082,
-      latitude: 17.4399,
-      longitude: 78.5082,
-      price: 800,
-      rating: 4.8,
-      reviews: 22,
-      amenities: ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen'],
-      sports: ['Football', 'Cricket', 'Kabaddi'],
-      image: 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop',
-      locationUrl: 'https://maps.google.com/?q=Addagutta+Secunderabad+Box+Turf',
-      plan: 'subscription',
-      ownerEmail: 'owner.akshay@turf.in',
-      ownerUpiId: 'akshay.box@okaxis',
-      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=akshay.box@okaxis',
-      status: 'approved',
-      is_verified: true
-    },
-    {
-      id: 2,
-      title: 'Kelo Bharat Sports Arena',
-      location: 'Gachibowli, Hyderabad',
-      lat: 17.4401,
-      lng: 78.3489,
-      latitude: 17.4401,
-      longitude: 78.3489,
-      price: 500,
-      rating: 4.9,
-      reviews: 39,
-      amenities: ['Changing Rooms', 'Washrooms', 'Bowling Machine'],
-      sports: ['Badminton', 'Tennis', 'Basketball'],
-      image: 'https://images.unsplash.com/photo-1518604666860-9ed391f76460?w=800&auto=format&fit=crop',
-      locationUrl: 'https://maps.google.com/?q=Gachibowli+Hyderabad+Sports+Arena',
-      plan: 'commission',
-      ownerEmail: 'owner.kelo@turf.in',
-      ownerUpiId: 'kelobharat@upi',
-      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=kelobharat@upi',
-      status: 'approved',
-      is_verified: true
-    },
-    {
-      id: 3,
-      title: 'Smash & Serve Tennis Hub',
-      location: 'Jubilee Hills, Hyderabad',
-      lat: 17.4319,
-      lng: 78.4071,
-      latitude: 17.4319,
-      longitude: 78.4071,
-      price: 1200,
-      rating: 4.9,
-      reviews: 31,
-      amenities: ['Changing Rooms', 'Parking', 'Cafe / Canteen'],
-      sports: ['Tennis', 'Pickleball', 'Volleyball'],
-      image: 'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&auto=format&fit=crop',
-      locationUrl: 'https://maps.google.com/?q=Jubilee+Hills+Tennis+Hub',
-      plan: 'subscription',
-      ownerEmail: 'owner.smash@turf.in',
-      ownerUpiId: 'smashserve@okicici',
-      ownerQrCodeUrl: 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=upi://pay?pa=smashserve@okicici',
-      status: 'approved',
-      is_verified: true
-    }
-  ]);
+  const [arenas, setArenas] = useState<Arena[]>([]);
+  const [isLoadingGrounds, setIsLoadingGrounds] = useState<boolean>(true);
 
   // Confirmed User Bookings List
   const [myBookings, setMyBookings] = useState<Booking[]>([
@@ -601,7 +557,7 @@ export default function WinDeclareApp() {
   };
 
   const ownerTurfs = useMemo(() => {
-    return arenas.filter(a => {
+    const filtered = arenas.filter(a => {
       if (!currentUser) return false;
       const userId = String(currentUser.id || '');
       const userEmail = currentUser.email?.toLowerCase();
@@ -615,6 +571,15 @@ export default function WinDeclareApp() {
         (ownerEmail && userEmail && ownerEmail === userEmail)
       );
     });
+
+    // Deduplicate by ID to guarantee 0 ghost/duplicate cards
+    const unique = new Map();
+    filtered.forEach(item => {
+      if (!unique.has(item.id)) {
+        unique.set(item.id, item);
+      }
+    });
+    return Array.from(unique.values());
   }, [arenas, currentUser]);
 
   const activeOwnerTurf = useMemo(() => {
@@ -1204,6 +1169,7 @@ export default function WinDeclareApp() {
 
   // Fetch Grounds directly from Supabase Database on page load & re-calculate live rating/reviews
   const fetchGroundsFromSupabase = useCallback(async () => {
+    setIsLoadingGrounds(true);
     try {
       const { data, error } = await supabase.from('grounds').select('*');
       const { data: reviewsData } = await supabase.from('reviews').select('ground_id, rating');
@@ -1218,7 +1184,7 @@ export default function WinDeclareApp() {
         });
       }
 
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         console.log("DEBUG: Raw Arenas/Grounds Fetched:", data);
         const mappedGrounds: Arena[] = data.map((item: any, index: number) => {
           const gId = String(item.id || item.ground_id);
@@ -1265,7 +1231,8 @@ export default function WinDeclareApp() {
             status: item.status || 'approved',
             is_verified: item.is_verified !== undefined && item.is_verified !== null ? Boolean(item.is_verified) : true,
             payment_mode: item.payment_mode || 'advance_only',
-            advance_amount: item.advance_amount !== undefined && item.advance_amount !== null ? Number(item.advance_amount) : 100
+            advance_amount: item.advance_amount !== undefined && item.advance_amount !== null ? Number(item.advance_amount) : 100,
+            operational_status: item.operational_status || 'active'
           };
         });
 
@@ -1292,6 +1259,8 @@ export default function WinDeclareApp() {
       }
     } catch (e) {
       console.error("Error fetching grounds from Supabase:", e);
+    } finally {
+      setIsLoadingGrounds(false);
     }
   }, []);
 
@@ -1397,9 +1366,9 @@ export default function WinDeclareApp() {
           Number(groundLat),
           Number(groundLng)
         );
-        return { ...ground, calculatedDistance: `${dist} km away` };
+        return { ...ground, rawDistance: dist, calculatedDistance: `${dist} km away` };
       }
-      return { ...ground, calculatedDistance: null };
+      return { ...ground, rawDistance: null, calculatedDistance: null };
     });
   }, [arenas, userLocation]);
 
@@ -1422,26 +1391,35 @@ export default function WinDeclareApp() {
     return [...localMatches, ...extraJoined];
   }, [groundsWithDistance, favoriteIds, favoriteGroundsData]);
 
-  // Extract unique sport types dynamically from fetched grounds
+  // Extract unique sport types dynamically based on active listed venues
   const availableSports = useMemo(() => {
-    const sportsSet = new Set<string>();
-    
+    const activeBase = ['Cricket', 'Snookers', 'Swimming', 'Tennis'];
+    const dynamicSports = new Set<string>();
+
     groundsWithDistance.forEach((ground: any) => {
+      const isApproved = ground.is_verified !== false && ground.status !== 'pending' && ground.status !== 'rejected';
+      const isNotHidden = ground.operational_status !== 'hidden';
+      if (!isApproved || !isNotHidden) return;
+
       if (ground.sport_type && typeof ground.sport_type === 'string') {
-        // Handle comma-separated strings or single values
         ground.sport_type.split(',').forEach((s: string) => {
-          const trimmed = s.trim();
-          if (trimmed) sportsSet.add(trimmed);
+          const clean = toTitleCase(s.trim());
+          if (clean && !['Football', 'Basketball', 'Badminton', 'Volleyball'].includes(clean)) {
+            dynamicSports.add(clean);
+          }
         });
       } else if (Array.isArray(ground.sports)) {
         ground.sports.forEach((s: string) => {
-          const trimmed = s.trim();
-          if (trimmed) sportsSet.add(trimmed);
+          const clean = toTitleCase(s.trim());
+          if (clean && !['Football', 'Basketball', 'Badminton', 'Volleyball'].includes(clean)) {
+            dynamicSports.add(clean);
+          }
         });
       }
     });
 
-    return ['All', ...Array.from(sportsSet).sort()];
+    const merged = Array.from(new Set([...activeBase, ...Array.from(dynamicSports)]));
+    return ['All', ...merged];
   }, [groundsWithDistance]);
 
   const amenitiesList = ['Changing Rooms', 'Washrooms', 'Parking', 'Cafe / Canteen', 'Bowling Machine'];
@@ -1520,6 +1498,10 @@ export default function WinDeclareApp() {
   };
 
   const toggleSlotSelection = (slot: { time: string; price: number }) => {
+    if (selectedArena?.operational_status === 'closed') {
+      showToast("❌ Ground is currently closed by administration.");
+      return;
+    }
     const exists = selectedSlots.some(s => s.time === slot.time);
     if (exists) {
       setSelectedSlots(selectedSlots.filter(s => s.time !== slot.time));
@@ -1784,6 +1766,19 @@ export default function WinDeclareApp() {
     await fetchGroundsFromSupabase();
   };
 
+  const handleUpdateOperationalStatus = async (groundId: string | number, status: 'active' | 'closed' | 'hidden') => {
+    const { error } = await supabase
+      .from('grounds')
+      .update({ operational_status: status })
+      .eq('id', groundId);
+    if (error) {
+      showToast(`❌ Failed to update operational status: ${error.message}`);
+      return;
+    }
+    showToast(`✅ Operational status set to ${status}!`);
+    await fetchGroundsFromSupabase();
+  };
+
   const handleOnlinePayment = async () => {
     if (!selectedArena || !currentUser) return;
 
@@ -1890,6 +1885,12 @@ export default function WinDeclareApp() {
     }
 
     if (!selectedArena) return;
+
+    if (selectedArena.operational_status === 'closed') {
+      alert('This ground is currently closed for bookings by administration.');
+      showToast('❌ Ground is currently closed for bookings.');
+      return;
+    }
 
     // Preventative Double-Booking Validation
     const targetDateStr = getYYYYMMDD(selectedDateIndex);
@@ -2083,6 +2084,66 @@ export default function WinDeclareApp() {
     setView('profile');
   };
 
+  const handleAddCustomSport = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newSportInput.trim();
+    if (!trimmed) {
+      setShowAddSportInput(false);
+      return;
+    }
+    const cleanTitle = toTitleCase(trimmed);
+    const normalized = normalizeSportKey(cleanTitle);
+
+    // Duplicate & Singular/Plural Normalization Guard
+    const existingMatch = availableSportsList.find(
+      s => normalizeSportKey(s) === normalized || s.toLowerCase() === cleanTitle.toLowerCase()
+    );
+
+    if (existingMatch) {
+      if (!selectedSports.includes(existingMatch)) {
+        setSelectedSports(prev => [...prev, existingMatch]);
+      }
+    } else {
+      setAvailableSportsList(prev => [...prev, cleanTitle]);
+      if (!selectedSports.includes(cleanTitle)) {
+        setSelectedSports(prev => [...prev, cleanTitle]);
+      }
+    }
+
+    setNewSportInput('');
+    setShowAddSportInput(false);
+  };
+
+  const handleAddEditCustomSport = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newEditSportInput.trim();
+    if (!trimmed) {
+      setShowEditAddSportInput(false);
+      return;
+    }
+    const cleanTitle = toTitleCase(trimmed);
+    const normalized = normalizeSportKey(cleanTitle);
+
+    // Duplicate & Singular/Plural Normalization Guard
+    const existingMatch = availableSportsList.find(
+      s => normalizeSportKey(s) === normalized || s.toLowerCase() === cleanTitle.toLowerCase()
+    );
+
+    if (existingMatch) {
+      if (!editingTurfSports.includes(existingMatch)) {
+        setEditingTurfSports(prev => [...prev, existingMatch]);
+      }
+    } else {
+      setAvailableSportsList(prev => [...prev, cleanTitle]);
+      if (!editingTurfSports.includes(cleanTitle)) {
+        setEditingTurfSports(prev => [...prev, cleanTitle]);
+      }
+    }
+
+    setNewEditSportInput('');
+    setShowEditAddSportInput(false);
+  };
+
   const toggleSport = (sport: string) => {
     if (selectedSports.includes(sport)) {
       setSelectedSports(selectedSports.filter(s => s !== sport));
@@ -2188,11 +2249,29 @@ export default function WinDeclareApp() {
     setEditingTurfLocationUrl(arena.locationUrl || (arena as any).location_url || '');
     setEditingTurfWhatsappNumber(arena.whatsappNumber || (arena as any).whatsapp_number || '');
     setEditingTurfUpiId(arena.ownerUpiId || arena.upiId || (arena as any).owner_upi_id || '');
-    setEditingTurfSports(arena.sports && arena.sports.length > 0 ? arena.sports : ((arena as any).sport_type ? (arena as any).sport_type.split(',').map((s: string) => s.trim()) : []));
+    const loadedSports = arena.sports && arena.sports.length > 0
+      ? arena.sports
+      : ((arena as any).sport_type ? (arena as any).sport_type.split(',').map((s: string) => s.trim()).filter(Boolean) : []);
+    setEditingTurfSports(loadedSports);
+    if (loadedSports.length > 0) {
+      setAvailableSportsList(prev => {
+        const nextList = [...prev];
+        loadedSports.forEach((sp: string) => {
+          const clean = toTitleCase(sp);
+          const norm = normalizeSportKey(clean);
+          if (!nextList.some(s => normalizeSportKey(s) === norm)) {
+            nextList.push(clean);
+          }
+        });
+        return nextList;
+      });
+    }
     setEditingTurfAmenities(arena.amenities || (arena as any).facilities || []);
     setEditingTurfImages(arena.images && arena.images.length > 0 ? arena.images : (arena.image ? [arena.image] : []));
     setEditingTurfPaymentMode((arena.payment_mode as any) || 'advance_only');
     setEditingTurfAdvanceAmount(arena.advance_amount ? Number(arena.advance_amount) : 100);
+    setShowEditAddSportInput(false);
+    setNewEditSportInput('');
     setShowEditTurfModal(true);
   };
 
@@ -2392,7 +2471,8 @@ export default function WinDeclareApp() {
           owner_id: currentOwnerId,
           owner_email: currentOwnerEmail,
           plan_type: selectedPlan,
-          plan: selectedPlan
+          plan: selectedPlan,
+          operational_status: 'active'
         };
 
         let gErr: any = null;
@@ -2413,7 +2493,6 @@ export default function WinDeclareApp() {
         await fetchGroundsFromSupabase();
         await fetchPendingGroundsFromSupabase();
 
-        setArenas(prev => [created, ...prev]);
         setShowAddTurfForm(false);
         alert('Turf submitted successfully! It is pending admin verification.');
         showToast('Turf submitted successfully! It is pending admin verification.');
@@ -2573,14 +2652,16 @@ export default function WinDeclareApp() {
 
             {/* Standard Navigation Options */}
             <div className="flex items-center gap-3">
-              <button 
-                onClick={() => setView('browse')}
-                className={`text-xs font-semibold px-3 py-2 rounded-xl transition ${
-                  view === 'browse' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-bold' : 'text-gray-300 hover:text-white'
-                }`}
-              >
-                Browse Grounds
-              </button>
+              {view !== 'owner-portal' && (
+                <button 
+                  onClick={() => setView('browse')}
+                  className={`text-xs font-semibold px-3 py-2 rounded-xl transition ${
+                    view === 'browse' ? 'bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-bold' : 'text-gray-300 hover:text-white'
+                  }`}
+                >
+                  Browse Grounds
+                </button>
+              )}
 
               {/* PROFILE DROPDOWN WITH DUAL-ROLE SWITCHER */}
               <div className="relative">
@@ -2697,18 +2778,6 @@ export default function WinDeclareApp() {
           <main className="max-w-7xl mx-auto px-4 py-8">
             <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-bold text-[#EC4899] tracking-widest uppercase bg-pink-500/10 border border-pink-500/20 px-2.5 py-1 rounded-md">
-                    ⚡ Instant Confirmation
-                  </span>
-
-                  {userLocation && (
-                    <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-md flex items-center gap-1">
-                      <Compass className="w-3.5 h-3.5" /> GPS Active
-                    </span>
-                  )}
-                </div>
-
                 <h1 className="text-3xl sm:text-4xl font-extrabold text-white">
                   Find the perfect <span className="text-[#EC4899]">turf</span> near you.
                 </h1>
@@ -2720,30 +2789,57 @@ export default function WinDeclareApp() {
 
             {/* Sports Filter & Search Bar */}
             <div className="bg-[#0e131f] border border-gray-800/80 rounded-2xl p-4 mb-6 space-y-4 shadow-xl">
-              <div className="flex flex-wrap gap-4 items-center justify-between">
-                <div className="flex-1 min-w-[280px] relative">
-                  <Search className="w-4 h-4 absolute left-3 top-3.5 text-gray-500" />
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+                <div className="flex-1 min-w-[260px] relative">
+                  <Search className="w-4 h-4 absolute left-3.5 top-3.5 text-gray-500" />
                   <input 
                     type="text" 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search by arena name, location (e.g. Addagutta, Gachibowli)..." 
-                    className="w-full bg-[#070b12] border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-[#EC4899] text-white"
+                    className="w-full bg-[#070b12] border border-gray-800 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:border-[#EC4899] text-white placeholder-gray-500 transition"
                   />
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-400 font-medium uppercase">Max Price:</span>
-                  <input 
-                    type="range" 
-                    min="300" 
-                    max="5000" 
-                    step="100" 
-                    value={maxPrice} 
-                    onChange={(e) => setMaxPrice(Number(e.target.value))}
-                    className="accent-[#EC4899] cursor-pointer"
-                  />
-                  <span className="text-sm font-bold text-[#EC4899] min-w-[80px]">₹{maxPrice}/hr</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isNearbyActive && !userLocation && typeof window !== 'undefined' && 'geolocation' in navigator) {
+                        navigator.geolocation.getCurrentPosition(
+                          (position) => {
+                            setUserLocation({
+                              lat: position.coords.latitude,
+                              lng: position.coords.longitude,
+                            });
+                          },
+                          (err) => console.warn('Geolocation error:', err)
+                        );
+                      }
+                      setIsNearbyActive(prev => !prev);
+                    }}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 outline-none ${
+                      isNearbyActive
+                        ? 'bg-gradient-to-r from-cyan-400 to-pink-500 text-slate-950 font-extrabold shadow-md shadow-pink-500/20 border-0 border-none'
+                        : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <Compass className={`w-3.5 h-3.5 ${isNearbyActive ? 'text-slate-950 stroke-[2.5]' : 'text-slate-400'}`} />
+                    Nearby
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsTopRatedActive(prev => !prev)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 outline-none ${
+                      isTopRatedActive
+                        ? 'bg-gradient-to-r from-cyan-400 to-pink-500 text-slate-950 font-extrabold shadow-md shadow-pink-500/20 border-0 border-none'
+                        : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${isTopRatedActive ? 'fill-slate-950 text-slate-950' : 'text-slate-400'}`} />
+                    Top Rated
+                  </button>
                 </div>
               </div>
 
@@ -2755,10 +2851,10 @@ export default function WinDeclareApp() {
                     <button
                       key={sport}
                       onClick={() => setSelectedSport(sport)}
-                      className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+                      className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all duration-200 outline-none ${
                         isActive
-                          ? 'bg-gradient-to-r from-pink-500 to-indigo-600 text-white shadow-md shadow-pink-500/20'
-                          : 'bg-zinc-900/80 text-zinc-400 border border-zinc-800 hover:text-white hover:border-zinc-700'
+                          ? 'bg-gradient-to-r from-cyan-400 to-pink-500 text-slate-950 font-bold shadow-md shadow-pink-500/20 border-0 border-none'
+                          : 'bg-slate-900/80 text-slate-400 hover:text-white border border-slate-800 hover:border-slate-700'
                       }`}
                     >
                       {sport}
@@ -2769,126 +2865,160 @@ export default function WinDeclareApp() {
             </div>
 
             {/* Arenas Grid */}
-            <div className="grid md:grid-cols-3 gap-6">
-              {groundsWithDistance
+            {isLoadingGrounds ? (
+              <div className="flex items-center justify-center min-h-[300px] w-full py-16">
+                <div className="relative w-12 h-12">
+                  <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-pink-500 border-r-cyan-400 animate-spin" />
+                  <div className="absolute inset-1 rounded-full border-2 border-transparent border-b-pink-500 border-l-cyan-400 animate-spin [animation-direction:reverse] opacity-70" />
+                </div>
+              </div>
+            ) : (() => {
+              const displayedArenas = groundsWithDistance
                 .filter(a => {
                   const isApproved = a.is_verified !== false && a.status !== 'pending' && a.status !== 'rejected';
+                  const isNotHidden = a.operational_status !== 'hidden';
                   const matchesSport = selectedSport.toLowerCase() === 'all' || (
                     (a.sport_type && typeof a.sport_type === 'string' && a.sport_type.toLowerCase().includes(selectedSport.toLowerCase())) ||
                     (Array.isArray(a.sports) && a.sports.some(s => s.toLowerCase() === selectedSport.toLowerCase() || s.toLowerCase().includes(selectedSport.toLowerCase())))
                   );
-                  const matchesPrice = a.price <= maxPrice;
+                  const matchesTopRated = !isTopRatedActive || Number(a.rating || 0) >= 4.5;
                   const matchesSearch = a.title.toLowerCase().includes(searchQuery.toLowerCase()) || a.location.toLowerCase().includes(searchQuery.toLowerCase());
                   
-                  return isApproved && matchesSport && matchesPrice && matchesSearch;
+                  return isApproved && isNotHidden && matchesSport && matchesTopRated && matchesSearch;
                 })
-                .map((arena) => {
-                  const isFav = favoriteIds.includes(String(arena.id));
-                  const cardImage = (arena.images && arena.images.length > 0 && arena.images[0])
-                    ? arena.images[0]
-                    : (arena.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop');
+                .sort((a, b) => {
+                  if (isNearbyActive) {
+                    const distA = a.rawDistance !== null && a.rawDistance !== undefined ? a.rawDistance : Infinity;
+                    const distB = b.rawDistance !== null && b.rawDistance !== undefined ? b.rawDistance : Infinity;
+                    if (distA !== distB) return distA - distB;
+                  }
+                  if (isTopRatedActive) {
+                    const rateA = Number(a.rating || 0);
+                    const rateB = Number(b.rating || 0);
+                    if (rateA !== rateB) return rateB - rateA;
+                  }
+                  return 0;
+                });
 
-                  return (
-                    <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-pink-500/40 transition flex flex-col justify-between shadow-xl group">
-                      <div>
-                        <div className="relative h-48 bg-gray-950 overflow-hidden">
-                          <img src={cardImage} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
-                          
-                          {arena.images && arena.images.length > 1 && (
-                            <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-white px-2 py-0.5 rounded-md flex items-center gap-1 border border-white/10 z-10">
-                              <Camera className="w-3 h-3 text-[#EC4899]" /> {arena.images.length} Photos
-                            </div>
-                          )}
-                          
-                          {/* Favorite Button */}
-                          <button 
-                            onClick={(e) => toggleFavorite(String(arena.id), e)}
-                            className="absolute top-3 right-3 bg-black/60 backdrop-blur p-2 rounded-xl border border-white/10 hover:scale-110 transition z-10"
-                          >
-                            <Heart className={`w-4 h-4 ${isFav ? 'fill-rose-500 text-rose-500' : 'text-white'}`} />
-                          </button>
+              if (displayedArenas.length === 0) {
+                return (
+                  <div className="text-center py-16 px-4 bg-[#080c14] border border-dashed border-gray-800 rounded-3xl space-y-3">
+                    <p className="text-gray-400 text-sm font-medium">No grounds found matching your filters.</p>
+                  </div>
+                );
+              }
 
-                          {arena.calculatedDistance ? (
-                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-pink-500/40 text-[#EC4899] text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
-                              <Navigation className="w-3 h-3 fill-[#EC4899]" /> {arena.calculatedDistance}
-                            </div>
-                          ) : userLocation ? (
-                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-pink-500/20 text-pink-300 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
-                              <Loader2 className="w-3 h-3 animate-spin text-[#EC4899]" /> Calculating...
-                            </div>
-                          ) : (
-                            <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-gray-700/60 text-gray-300 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
-                              <MapPin className="w-3 h-3 text-[#EC4899]" /> {arena.location ? arena.location.split(',')[0] : 'Hyderabad'}
-                            </div>
-                          )}
+              return (
+                <div className="grid md:grid-cols-3 gap-6">
+                  {displayedArenas.map((arena) => {
+                    const isFav = favoriteIds.includes(String(arena.id));
+                    const cardImage = (arena.images && arena.images.length > 0 && arena.images[0])
+                      ? arena.images[0]
+                      : (arena.image || 'https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=800&auto=format&fit=crop');
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveReviewsModalGround({ id: String(arena.id), title: arena.title });
-                            }}
-                            className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-extrabold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1 border border-amber-400/20 shadow-md cursor-pointer hover:scale-105 transition-transform z-10"
-                            title="Click to view verified reviews"
-                          >
-                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                            {((arena.reviews_count ?? arena.reviews ?? 0) === 0) ? (
-                              <span>New</span>
-                            ) : (
-                              <span>
-                                {arena.rating ? Number(arena.rating).toFixed(1) : '5.0'} ({arena.reviews_count ?? arena.reviews ?? 0})
-                              </span>
+                    return (
+                      <div key={arena.id} className="bg-[#0e1320] border border-gray-800 rounded-2xl overflow-hidden hover:border-pink-500/40 transition flex flex-col justify-between shadow-xl group">
+                        <div>
+                          <div className="relative h-48 bg-gray-950 overflow-hidden">
+                            <img src={cardImage} alt={arena.title} className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                            
+                            {arena.images && arena.images.length > 1 && (
+                              <div className="absolute bottom-3 right-3 bg-black/80 backdrop-blur text-[10px] font-bold text-white px-2 py-0.5 rounded-md flex items-center gap-1 border border-white/10 z-10">
+                                <Camera className="w-3 h-3 text-[#EC4899]" /> {arena.images.length} Photos
+                              </div>
                             )}
-                          </button>
+                            
+                            {/* Favorite Button */}
+                            <button 
+                              onClick={(e) => toggleFavorite(String(arena.id), e)}
+                              className="absolute top-3 right-3 bg-black/60 backdrop-blur p-2 rounded-xl border border-white/10 hover:scale-110 transition z-10"
+                            >
+                              <Heart className={`w-4 h-4 ${isFav ? 'fill-rose-500 text-rose-500' : 'text-white'}`} />
+                            </button>
 
-                        </div>
+                            {arena.calculatedDistance ? (
+                              <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-pink-500/40 text-[#EC4899] text-xs font-extrabold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                                <Navigation className="w-3 h-3 fill-[#EC4899]" /> {arena.calculatedDistance}
+                              </div>
+                            ) : userLocation ? (
+                              <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-pink-500/20 text-pink-300 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                                <Loader2 className="w-3 h-3 animate-spin text-[#EC4899]" /> Calculating...
+                              </div>
+                            ) : (
+                              <div className="absolute top-3 left-3 bg-black/80 backdrop-blur border border-gray-700/60 text-gray-300 text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-md">
+                                <MapPin className="w-3 h-3 text-[#EC4899]" /> {arena.location ? arena.location.split(',')[0] : 'Hyderabad'}
+                              </div>
+                            )}
 
-                        <div className="p-5 flex-1 flex flex-col justify-between space-y-2">
-                          <div>
-                            <h3 className="font-bold text-lg text-white group-hover:text-[#EC4899] transition">{arena.title}</h3>
-                            <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
-                              <MapPin className="w-3.5 h-3.5 text-[#EC4899]" /> {arena.location}
-                            </p>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveReviewsModalGround({ id: String(arena.id), title: arena.title });
+                              }}
+                              className="absolute bottom-3 left-3 bg-black/80 backdrop-blur text-xs font-extrabold text-amber-400 px-2.5 py-1 rounded-md flex items-center gap-1 border border-amber-400/20 shadow-md cursor-pointer hover:scale-105 transition-transform z-10"
+                              title="Click to view verified reviews"
+                            >
+                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                              {((arena.reviews_count ?? arena.reviews ?? 0) === 0) ? (
+                                <span>New</span>
+                              ) : (
+                                <span>
+                                  {arena.rating ? Number(arena.rating).toFixed(1) : '5.0'} ({arena.reviews_count ?? arena.reviews ?? 0})
+                                </span>
+                              )}
+                            </button>
+
                           </div>
 
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {arena.sports.map(s => (
-                              <span key={s} className="bg-pink-500/10 text-[#EC4899] border border-pink-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
-                                {s}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="p-5 pt-0">
-                        <div className="mt-4 pt-4 border-t border-gray-800 space-y-3">
-                          <div className="flex items-center justify-between">
+                          <div className="p-5 flex-1 flex flex-col justify-between space-y-2">
                             <div>
-                              <span className="text-xl font-bold text-white">₹{arena.price}</span>
-                              <span className="text-xs text-gray-500">/hr</span>
+                              <h3 className="font-bold text-lg text-white group-hover:text-[#EC4899] transition">{arena.title}</h3>
+                              <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
+                                <MapPin className="w-3.5 h-3.5 text-[#EC4899]" /> {arena.location}
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-1 mt-2">
+                              {arena.sports.map(s => (
+                                <span key={s} className="bg-pink-500/10 text-[#EC4899] border border-pink-500/20 text-[10px] font-bold px-2 py-0.5 rounded">
+                                  {s}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-5 pt-0">
+                          <div className="mt-4 pt-4 border-t border-gray-800 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <span className="text-xl font-bold text-white">₹{arena.price}</span>
+                                <span className="text-xs text-gray-500">/hr</span>
+                              </div>
+
+                              <button 
+                                onClick={() => handleSelectArena(arena)}
+                                className="px-4 py-2 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/10"
+                              >
+                                Book Slot →
+                              </button>
                             </div>
 
                             <button 
-                              onClick={() => handleSelectArena(arena)}
-                              className="px-4 py-2 bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] text-black font-extrabold text-xs rounded-xl transition shadow-lg shadow-pink-500/10"
+                              onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
+                              className="w-full py-2 bg-[#080c14] hover:bg-gray-900 border border-teal-500/30 text-teal-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
                             >
-                              Book Slot →
+                              <Navigation className="w-3.5 h-3.5" /> Navigate
                             </button>
                           </div>
-
-                          <button 
-                            onClick={() => handleNavigate(arena.title, arena.location, arena.locationUrl)}
-                            className="w-full py-2 bg-[#080c14] hover:bg-gray-900 border border-teal-500/30 text-teal-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
-                          >
-                            <Navigation className="w-3.5 h-3.5" /> Navigate
-                          </button>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-            </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </main>
         )}
 
@@ -3011,17 +3141,40 @@ export default function WinDeclareApp() {
                 </div>
               </div>
 
-              {/* Slot Selection with Double-Booking Locking */}
+              {/* Slot Selection with Double-Booking Locking & Operational Status Check */}
               <div className="space-y-3">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5 text-[#EC4899]" /> AVAILABLE SLOTS
                 </span>
+
+                {selectedArena.operational_status === 'closed' && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center gap-3 text-amber-300 text-xs font-semibold">
+                    <span className="text-base">🟡</span>
+                    <span>This venue is currently closed for bookings by ground administration.</span>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-3 gap-3">
                     {getSlotsDataForArena(selectedArena, selectedDateIndex).map((slot) => {
                       const now = new Date();
                       const isToday = selectedDateIndex === 0;
                       const slotHour = parseSlotTimeToHour(slot.time);
                       if (isToday && slotHour <= now.getHours()) return null;
+
+                      const isClosedGround = selectedArena.operational_status === 'closed';
+
+                      if (isClosedGround) {
+                        return (
+                          <button
+                            key={slot.time}
+                            disabled={true}
+                            className="p-3 rounded-2xl border transition text-center space-y-1 bg-amber-950/20 border border-amber-900/40 text-amber-500/70 opacity-60 cursor-not-allowed flex flex-col items-center justify-center"
+                          >
+                            <p className="text-xs font-extrabold">{slot.time}</p>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full mt-1">Closed</span>
+                          </button>
+                        );
+                      }
 
                       const normalizedSlotTime = normalizeTimeString(slot.time);
                       const isSelected = selectedSlots.some(s => normalizeTimeString(s.time) === normalizedSlotTime);
@@ -3071,7 +3224,7 @@ export default function WinDeclareApp() {
               </div>
 
               {/* Checkout Bar */}
-              {selectedSlots.length > 0 && (
+              {selectedSlots.length > 0 && selectedArena.operational_status !== 'closed' && (
                 <div className="pt-4 border-t border-gray-800 space-y-4">
                   <div className="bg-[#080c14] border border-gray-800 rounded-2xl p-4 flex items-center justify-between">
                     <div>
@@ -3436,39 +3589,321 @@ export default function WinDeclareApp() {
               </div>
             )}
 
-            {/* TAB 4: TURF LISTINGS */}
+            {/* TAB 4: TURF LISTINGS & FINANCIAL DRILLDOWN */}
             {adminTab === 'turfs' && (
-              <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
-                <h3 className="font-bold text-lg text-white">All Active Ground Venues</h3>
-                <div className="grid md:grid-cols-2 gap-4">
-                  {arenas.map(ground => (
-                    <div key={ground.id} className="bg-[#080c14] border border-gray-800 p-4 rounded-xl flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <img src={ground.image} alt={ground.title} className="w-12 h-12 rounded-lg object-cover" />
+              selectedAdminGroundId !== null ? (
+                (() => {
+                  const targetGround = arenas.find(g => String(g.id) === String(selectedAdminGroundId)) || arenas[0];
+                  if (!targetGround) return null;
+
+                  const groundBookings = myBookings.filter(b => 
+                    String(b.arenaId) === String(targetGround.id) || 
+                    String(b.ground_id) === String(targetGround.id)
+                  );
+
+                  const totalGrossOnline = groundBookings.reduce((sum, b) => {
+                    const isOffline = b.booking_type === 'offline' || b.payment_status === 'offline_cash';
+                    const onlinePaid = isOffline ? 0 : Number(b.paid_amount ?? b.paidAmount ?? b.amount ?? 0);
+                    return sum + onlinePaid;
+                  }, 0);
+                  const commissionRate = targetGround.plan === 'commission' ? 10 : (targetGround.plan === 'hybrid' ? 3 : 0);
+                  const platformCommissionEarned = Math.round(totalGrossOnline * (commissionRate / 100));
+                  const netOwnerPayoutDue = totalGrossOnline - platformCommissionEarned;
+                  const ownerUpi = targetGround.upiId || targetGround.ownerUpiId || 'owner@okaxis';
+
+                  const groupedByDate: Record<string, Booking[]> = {};
+                  groundBookings.forEach(b => {
+                    const dStr = b.date || b.createdAt?.split('T')[0] || 'Unknown Date';
+                    if (!groupedByDate[dStr]) groupedByDate[dStr] = [];
+                    groupedByDate[dStr].push(b);
+                  });
+
+                  const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a));
+
+                  return (
+                    <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-6">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-800 pb-4">
                         <div>
-                          <h4 className="font-bold text-white text-xs">{ground.title}</h4>
-                          <p className="text-[10px] text-gray-400">{ground.location}</p>
-                          <p className="text-[10px] font-bold text-[#EC4899] mt-0.5">₹{ground.price}/hr • Plan: {ground.plan}</p>
+                          <button 
+                            onClick={() => setSelectedAdminGroundId(null)}
+                            className="text-xs font-bold text-gray-400 hover:text-white transition flex items-center gap-1.5 mb-2"
+                          >
+                            ← Back to Grounds List
+                          </button>
+                          <div className="flex items-center gap-3">
+                            <img src={targetGround.image} alt={targetGround.title} className="w-12 h-12 rounded-xl object-cover" />
+                            <div>
+                              <h2 className="text-xl font-black text-white">{targetGround.title}</h2>
+                              <p className="text-xs text-gray-400">{targetGround.location} • UPI: <span className="font-mono text-[#EC4899] font-bold">{ownerUpi}</span></p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => {
+                              navigator.clipboard.writeText(ownerUpi);
+                              showToast('📋 Owner UPI ID copied to clipboard!');
+                            }}
+                            className="text-xs font-bold bg-gray-900 hover:bg-gray-800 text-teal-400 border border-teal-500/30 px-3 py-2 rounded-xl transition flex items-center gap-1.5"
+                          >
+                            📋 Copy Owner UPI
+                          </button>
+                          <select
+                            value={targetGround.operational_status || 'active'}
+                            onChange={(e) => handleUpdateOperationalStatus(targetGround.id, e.target.value as any)}
+                            className={`text-xs font-bold px-3 py-2 rounded-xl transition border focus:outline-none cursor-pointer ${
+                              (targetGround.operational_status || 'active') === 'active'
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                : (targetGround.operational_status || 'active') === 'closed'
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            }`}
+                          >
+                            <option value="active" className="bg-gray-900 text-emerald-400">🟢 Active</option>
+                            <option value="closed" className="bg-gray-900 text-amber-400">🟡 Closed</option>
+                            <option value="hidden" className="bg-gray-900 text-rose-400">🔴 Hide</option>
+                          </select>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2.5 py-1 text-xs rounded-full bg-emerald-500/20 text-emerald-400 font-medium">
-                          Active
-                        </span>
-                        <button
-                          onClick={() => handleOpenAdminEditModal(ground)}
-                          className="px-3 py-1 text-xs font-semibold rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition-colors flex items-center gap-1.5"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          Edit
-                        </button>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-[#080c14] border border-gray-800 p-4 rounded-xl space-y-1">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Lifetime Bookings</span>
+                          <span className="text-xl font-black text-white font-mono">{groundBookings.length}</span>
+                        </div>
+                        <div className="bg-[#080c14] border border-gray-800 p-4 rounded-xl space-y-1">
+                          <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">Gross Online Collected</span>
+                          <span className="text-xl font-black text-emerald-400 font-mono">₹{totalGrossOnline.toLocaleString()}</span>
+                        </div>
+                        <div className="bg-[#080c14] border border-gray-800 p-4 rounded-xl space-y-1">
+                          <span className="text-[10px] font-bold text-purple-400 uppercase tracking-wider block">Platform Commission ({commissionRate}%)</span>
+                          <span className="text-xl font-black text-purple-400 font-mono">₹{platformCommissionEarned.toLocaleString()}</span>
+                        </div>
+                        <div className="bg-[#080c14] border border-gray-800 p-4 rounded-xl space-y-1">
+                          <span className="text-[10px] font-bold text-[#EC4899] uppercase tracking-wider block">Net Owner Payout Due</span>
+                          <span className="text-xl font-black text-[#EC4899] font-mono">₹{netOwnerPayoutDue.toLocaleString()}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h3 className="font-bold text-base text-white flex items-center justify-between">
+                          <span>Day-by-Day Financial Ledger & Settlement Status</span>
+                          <span className="text-xs text-gray-400 font-normal">T+2 Settlement Rule Applied</span>
+                        </h3>
+
+                        {sortedDates.length === 0 ? (
+                          <p className="text-xs text-gray-500 italic py-4">No online booking transactions recorded for this ground venue yet.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {sortedDates.map(dateStr => {
+                              const dayBookings = groupedByDate[dateStr];
+                              const daySlotsCount = dayBookings.reduce((acc, b) => acc + (b.slots ? b.slots.split(',').length : 1), 0);
+                              const dayGross = dayBookings.reduce((acc, b) => {
+                                const isOffline = b.booking_type === 'offline' || b.payment_status === 'offline_cash';
+                                const onlinePaid = isOffline ? 0 : Number(b.paid_amount ?? b.paidAmount ?? b.amount ?? 0);
+                                return acc + onlinePaid;
+                              }, 0);
+                              const dayComm = Math.round(dayGross * (commissionRate / 100));
+                              const dayNetPayout = dayGross - dayComm;
+
+                              const today = new Date();
+                              today.setHours(0, 0, 0, 0);
+                              const dateObj = new Date(dateStr);
+                              dateObj.setHours(0, 0, 0, 0);
+                              const diffMs = today.getTime() - dateObj.getTime();
+                              const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                              const isT2Met = diffDays >= 2;
+                              const isExpanded = expandedAdminDateRow === dateStr;
+
+                              return (
+                                <div key={dateStr} className="bg-[#080c14] border border-gray-800 rounded-xl overflow-hidden">
+                                  <div 
+                                    onClick={() => setExpandedAdminDateRow(isExpanded ? null : dateStr)}
+                                    className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer hover:bg-gray-900/40 transition"
+                                  >
+                                    <div className="flex items-center gap-3">
+                                      <span className="font-mono text-sm font-black text-white">{dateStr}</span>
+                                      <span className="text-[10px] font-bold bg-gray-800 text-gray-300 px-2 py-0.5 rounded">
+                                        {daySlotsCount} Slot(s)
+                                      </span>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
+                                      <div>
+                                        <span className="text-[10px] text-gray-500 block font-sans">Gross:</span>
+                                        <span className="font-bold text-white">₹{dayGross}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-[10px] text-purple-400 block font-sans">Platform Fee:</span>
+                                        <span className="font-bold text-purple-400">-₹{dayComm}</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-[10px] text-[#EC4899] block font-sans">Owner Payout:</span>
+                                        <span className="font-bold text-[#EC4899]">₹{dayNetPayout}</span>
+                                      </div>
+
+                                      {isT2Met ? (
+                                        <div className="flex items-center gap-2">
+                                          <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold px-2.5 py-1 rounded-lg text-[10px]">
+                                            🟡 Ready for Payout (T+2 Met)
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              navigator.clipboard.writeText(`${ownerUpi} | ₹${dayNetPayout}`);
+                                              showToast(`📋 Copied Payout Details: ${ownerUpi} | ₹${dayNetPayout}`);
+                                            }}
+                                            className="text-[10px] font-bold bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 px-2.5 py-1 rounded-lg transition"
+                                          >
+                                            📋 Copy UPI & Amount
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <span className="bg-purple-500/10 border border-purple-500/30 text-purple-400 font-bold px-2.5 py-1 rounded-lg text-[10px]">
+                                          ⏳ In Escrow (T+1 / Today)
+                                        </span>
+                                      )}
+
+                                      <span className="text-gray-500 text-sm">{isExpanded ? '▲' : '▼'}</span>
+                                    </div>
+                                  </div>
+
+                                  {isExpanded && (
+                                    <div className="p-4 bg-[#05080e] border-t border-gray-800 space-y-2">
+                                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-2">Itemized Slot Bookings for {dateStr}:</span>
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-xs border-collapse font-mono">
+                                          <thead>
+                                            <tr className="border-b border-gray-800 text-gray-500 text-[10px] uppercase font-sans">
+                                              <th className="py-2 px-3">Booking Ref</th>
+                                              <th className="py-2 px-3">Slot Time</th>
+                                              <th className="py-2 px-3">Player Contact</th>
+                                              <th className="py-2 px-3">Online Paid</th>
+                                              <th className="py-2 px-3">Venue Balance</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody className="divide-y divide-gray-800/40 text-gray-300">
+                                            {dayBookings.map(b => {
+                                              const isOffline = b.booking_type === 'offline' || b.payment_status === 'offline_cash';
+                                              const onlinePaid = isOffline ? 0 : Number(b.paid_amount ?? b.paidAmount ?? b.amount ?? 0);
+
+                                              return (
+                                                <tr key={b.id}>
+                                                  <td className="py-2 px-3 font-bold text-[#EC4899]">{b.id}</td>
+                                                  <td className="py-2 px-3">{b.slots}</td>
+                                                  <td className="py-2 px-3 font-sans text-gray-400">{b.userContact || 'N/A'}</td>
+                                                  <td className="py-2 px-3">
+                                                    {isOffline ? (
+                                                      <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-bold px-2 py-0.5 rounded-md font-sans inline-flex items-center gap-1">
+                                                        ₹0 <span className="text-gray-400 font-normal">(Offline Cash)</span>
+                                                      </span>
+                                                    ) : (
+                                                      <span className="font-bold text-emerald-400 font-mono">₹{onlinePaid}</span>
+                                                    )}
+                                                  </td>
+                                                  <td className="py-2 px-3 text-amber-400 font-mono">₹{b.balance_amount ?? b.balanceAmount ?? 0}</td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  );
+                })()
+              ) : (
+                <div className="bg-[#0e1320] border border-gray-800 rounded-2xl p-6 shadow-2xl space-y-4">
+                  <h3 className="font-bold text-lg text-white">All Active Ground Venues</h3>
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {arenas.map(ground => {
+                      const groundBookings = myBookings.filter(b => String(b.arenaId) === String(ground.id) || String(b.ground_id) === String(ground.id));
+                      const totalOnlineColl = groundBookings.reduce((sum, b) => {
+                        const isOffline = b.booking_type === 'offline' || b.payment_status === 'offline_cash';
+                        const onlinePaid = isOffline ? 0 : Number(b.paid_amount ?? b.paidAmount ?? b.amount ?? 0);
+                        return sum + onlinePaid;
+                      }, 0);
+                      const ownerUpi = ground.upiId || ground.ownerUpiId || 'owner@okaxis';
+
+                      return (
+                        <div key={ground.id} className="bg-[#080c14] border border-gray-800 p-5 rounded-xl flex flex-col justify-between space-y-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <img src={ground.image} alt={ground.title} className="w-14 h-14 rounded-lg object-cover" />
+                              <div>
+                                <h4 className="font-bold text-white text-sm">{ground.title}</h4>
+                                <p className="text-[11px] text-gray-400">{ground.location}</p>
+                                <p className="text-[11px] font-bold text-[#EC4899] mt-0.5">₹{ground.price}/hr • Plan: {ground.plan}</p>
+                              </div>
+                            </div>
+                            <select
+                              value={ground.operational_status || 'active'}
+                              onChange={(e) => handleUpdateOperationalStatus(ground.id, e.target.value as any)}
+                              className={`text-xs font-bold px-2 py-1 rounded-lg transition border focus:outline-none cursor-pointer ${
+                                (ground.operational_status || 'active') === 'active'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                  : (ground.operational_status || 'active') === 'closed'
+                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                  : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                              }`}
+                            >
+                              <option value="active" className="bg-gray-900 text-emerald-400">🟢 Active</option>
+                              <option value="closed" className="bg-gray-900 text-amber-400">🟡 Closed</option>
+                              <option value="hidden" className="bg-gray-900 text-rose-400">🔴 Hide</option>
+                            </select>
+                          </div>
+
+                          <div className="bg-[#0e1320] border border-gray-800 rounded-lg p-3 grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="text-[10px] font-bold text-gray-500 uppercase block">Owner UPI ID</span>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <span className="font-mono text-[#EC4899] font-bold text-[11px] truncate">{ownerUpi}</span>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(ownerUpi);
+                                    showToast('📋 UPI ID copied!');
+                                  }}
+                                  className="text-[10px] text-gray-400 hover:text-white bg-gray-900 px-1.5 py-0.5 rounded border border-gray-800 shrink-0"
+                                >
+                                  📋
+                                </button>
+                              </div>
+                            </div>
+                            <div>
+                              <span className="text-[10px] font-bold text-gray-500 uppercase block">Lifetime Metrics</span>
+                              <span className="font-mono text-white text-[11px] font-bold block mt-0.5">{groundBookings.length} Bookings • ₹{totalOnlineColl.toLocaleString()}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={() => setSelectedAdminGroundId(ground.id)}
+                              className="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-gradient-to-r from-[#0EA5E9] to-[#EC4899] hover:brightness-110 text-black shadow-md transition flex items-center justify-center gap-1.5"
+                            >
+                              📊 View Bookings & Payouts
+                            </button>
+                            <button
+                              onClick={() => handleOpenAdminEditModal(ground)}
+                              className="px-3 py-2 text-xs font-semibold rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition flex items-center gap-1.5"
+                            >
+                              <Edit className="w-3.5 h-3.5" /> Edit
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )
             )}
 
             {/* TAB 5: BOOKINGS & TRANSACTIONS */}
@@ -3970,10 +4405,10 @@ export default function WinDeclareApp() {
                                     }`}
                                   >
                                     <div className="flex items-center justify-between">
-                                      <span className="text-xs font-black">Advance Only (₹100)</span>
+                                      <span className="text-xs font-black">Advance Only</span>
                                       {newArenaPaymentMode === 'advance_only' && <Check className="w-3.5 h-3.5 text-[#EC4899]" />}
                                     </div>
-                                    <p className="text-[10px] text-gray-400 mt-1">Charge ₹100 online to reserve. Balance collected at venue</p>
+                                    <p className="text-[10px] text-gray-400 mt-1">Charge advance online to reserve. Balance collected at venue</p>
                                   </button>
 
                                   <button
@@ -3989,7 +4424,7 @@ export default function WinDeclareApp() {
                                       <span className="text-xs font-black">Allow Both</span>
                                       {newArenaPaymentMode === 'both' && <Check className="w-3.5 h-3.5 text-[#0EA5E9]" />}
                                     </div>
-                                    <p className="text-[10px] text-gray-400 mt-1">Player chooses full payment or ₹100 advance</p>
+                                    <p className="text-[10px] text-gray-400 mt-1">Player chooses full payment or custom advance amount</p>
                                   </button>
 
                                   <button
@@ -4095,8 +4530,8 @@ export default function WinDeclareApp() {
                                 <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
                                   Supported Sports * <span className="text-gray-500 font-normal lowercase">(Select all that apply)</span>
                                 </label>
-                                <div className="flex flex-wrap gap-2">
-                                  {AVAILABLE_SPORTS.map((sport) => {
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {availableSportsList.map((sport) => {
                                     const isSelected = selectedSports.includes(sport);
                                     return (
                                       <button
@@ -4114,6 +4549,54 @@ export default function WinDeclareApp() {
                                       </button>
                                     );
                                   })}
+
+                                  {/* + Add Custom Sport Inline UI */}
+                                  {showAddSportInput ? (
+                                    <div className="flex items-center gap-1.5 bg-[#080c14] border border-[#EC4899]/50 rounded-xl p-1 shadow-md">
+                                      <input
+                                        type="text"
+                                        autoFocus
+                                        placeholder="Sport name..."
+                                        value={newSportInput}
+                                        onChange={(e) => setNewSportInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handleAddCustomSport();
+                                          } else if (e.key === 'Escape') {
+                                            setShowAddSportInput(false);
+                                            setNewSportInput('');
+                                          }
+                                        }}
+                                        className="bg-transparent text-xs text-white px-2 py-1 outline-none w-28 placeholder-gray-500"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAddCustomSport()}
+                                        className="px-2.5 py-1 bg-[#EC4899] hover:bg-pink-600 text-black font-extrabold text-[11px] rounded-lg transition"
+                                      >
+                                        Add
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setShowAddSportInput(false);
+                                          setNewSportInput('');
+                                        }}
+                                        className="px-2 py-1 text-gray-400 hover:text-white text-[11px] font-bold transition"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowAddSportInput(true)}
+                                      className="px-3.5 py-2 rounded-xl text-xs font-bold border border-dashed border-pink-500/40 text-[#EC4899] hover:bg-pink-500/10 hover:border-[#EC4899] transition-all flex items-center gap-1.5"
+                                    >
+                                      <Plus className="w-3.5 h-3.5 stroke-[3]" /> Add
+                                    </button>
+                                  )}
                                 </div>
                               </div>
 
@@ -4255,8 +4738,14 @@ export default function WinDeclareApp() {
                                     <div>
                                       <div className="flex items-center gap-2">
                                         <h3 className="font-extrabold text-white text-base">{arena.title}</h3>
-                                        <span className="bg-emerald-500/10 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded border border-emerald-500/20">
-                                          Active
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                          (arena.operational_status || 'active') === 'active'
+                                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                            : (arena.operational_status || 'active') === 'closed'
+                                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                        }`}>
+                                          {(arena.operational_status || 'active') === 'active' ? '🟢 Active' : (arena.operational_status || 'active') === 'closed' ? '🟡 Closed' : '🔴 Hidden'}
                                         </span>
                                       </div>
                                       <p className="text-xs text-gray-400 mt-0.5">{arena.location}</p>
@@ -4266,7 +4755,22 @@ export default function WinDeclareApp() {
                                     </div>
                                   </div>
 
-                                  <div className="flex items-center gap-2 self-start sm:self-auto">
+                                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                                    <select
+                                      value={arena.operational_status || 'active'}
+                                      onChange={(e) => handleUpdateOperationalStatus(arena.id, e.target.value as 'active' | 'closed' | 'hidden')}
+                                      className={`text-xs font-bold px-2.5 py-2 rounded-xl transition border focus:outline-none cursor-pointer ${
+                                        (arena.operational_status || 'active') === 'active'
+                                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                          : (arena.operational_status || 'active') === 'closed'
+                                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                          : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                      }`}
+                                    >
+                                      <option value="active" className="bg-gray-900 text-emerald-400">🟢 Active</option>
+                                      <option value="closed" className="bg-gray-900 text-amber-400">🟡 Closed</option>
+                                      <option value="hidden" className="bg-gray-900 text-rose-400">🔴 Hide</option>
+                                    </select>
                                     <button 
                                       type="button"
                                       onClick={() => handleOpenEditTurfModal(arena)}
@@ -4328,10 +4832,10 @@ export default function WinDeclareApp() {
                                       }`}
                                     >
                                       <div className="flex items-center justify-between">
-                                        <span className="text-xs font-bold">Advance Only (₹100)</span>
+                                        <span className="text-xs font-bold">Advance Only</span>
                                         {(arena.payment_mode || 'advance_only') === 'advance_only' && <Check className="w-3 h-3 text-[#EC4899]" />}
                                       </div>
-                                      <p className="text-[9px] text-gray-400 mt-0.5">Charge ₹100 online. Balance at venue</p>
+                                      <p className="text-[9px] text-gray-400 mt-0.5">Charge advance online to reserve. Balance collected at venue</p>
                                     </button>
 
                                     <button
@@ -4347,7 +4851,7 @@ export default function WinDeclareApp() {
                                         <span className="text-xs font-bold">Allow Both</span>
                                         {arena.payment_mode === 'both' && <Check className="w-3 h-3 text-[#0EA5E9]" />}
                                       </div>
-                                      <p className="text-[9px] text-gray-400 mt-0.5">Player chooses full or ₹100 advance</p>
+                                      <p className="text-[9px] text-gray-400 mt-0.5">Player chooses full payment or custom advance amount</p>
                                     </button>
 
                                     <button
@@ -5568,10 +6072,10 @@ export default function WinDeclareApp() {
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-black">Advance Only (₹100)</span>
+                      <span className="text-xs font-black">Advance Only</span>
                       {editingTurfPaymentMode === 'advance_only' && <Check className="w-3.5 h-3.5 text-[#EC4899]" />}
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-1">Charge ₹100 online to reserve. Balance collected at venue</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Charge advance online to reserve. Balance collected at venue</p>
                   </button>
 
                   <button
@@ -5587,7 +6091,7 @@ export default function WinDeclareApp() {
                       <span className="text-xs font-black">Allow Both</span>
                       {editingTurfPaymentMode === 'both' && <Check className="w-3.5 h-3.5 text-[#0EA5E9]" />}
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-1">Player chooses full payment or ₹100 advance</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Player chooses full payment or custom advance amount</p>
                   </button>
 
                   <button
@@ -5631,8 +6135,8 @@ export default function WinDeclareApp() {
                 <label className="block text-[11px] font-bold text-[#EC4899] uppercase">
                   Supported Sports * <span className="text-gray-500 font-normal lowercase">(Select all that apply)</span>
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {AVAILABLE_SPORTS.map((sport) => {
+                <div className="flex flex-wrap items-center gap-2">
+                  {availableSportsList.map((sport) => {
                     const isSelected = editingTurfSports.includes(sport);
                     return (
                       <button
@@ -5656,6 +6160,54 @@ export default function WinDeclareApp() {
                       </button>
                     );
                   })}
+
+                  {/* + Add Custom Sport Inline UI in Edit Modal */}
+                  {showEditAddSportInput ? (
+                    <div className="flex items-center gap-1.5 bg-[#080c14] border border-[#EC4899]/50 rounded-xl p-1 shadow-md">
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="Sport name..."
+                        value={newEditSportInput}
+                        onChange={(e) => setNewEditSportInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddEditCustomSport();
+                          } else if (e.key === 'Escape') {
+                            setShowEditAddSportInput(false);
+                            setNewEditSportInput('');
+                          }
+                        }}
+                        className="bg-transparent text-xs text-white px-2 py-1 outline-none w-28 placeholder-gray-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddEditCustomSport()}
+                        className="px-2.5 py-1 bg-[#EC4899] hover:bg-pink-600 text-black font-extrabold text-[11px] rounded-lg transition"
+                      >
+                        Add
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowEditAddSportInput(false);
+                          setNewEditSportInput('');
+                        }}
+                        className="px-2 py-1 text-gray-400 hover:text-white text-[11px] font-bold transition"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowEditAddSportInput(true)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold border border-dashed border-pink-500/40 text-[#EC4899] hover:bg-pink-500/10 hover:border-[#EC4899] transition-all flex items-center gap-1.5"
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[3]" /> Add
+                    </button>
+                  )}
                 </div>
               </div>
 
