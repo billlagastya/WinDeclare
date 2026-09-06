@@ -18,3 +18,6 @@ local.properties
 *.aab
 *.keystore
 *.jks
+
+# Ensure Gradle wrapper JAR is tracked
+!gradle/wrapper/gradle-wrapper.jar
